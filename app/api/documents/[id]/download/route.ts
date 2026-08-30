@@ -31,7 +31,28 @@ export async function GET(
   const { id } = await params;
   const document = await getDocument(id);
   const storage = getStorageProvider();
-  const buffer = await storage.read(document.fileKey);
+  let buffer: Buffer;
+  try {
+    buffer = await storage.read(document.fileKey);
+  } catch (err) {
+    // On the local-disk storage provider specifically, a file can go
+    // missing if the server process has restarted since it was uploaded —
+    // local disk isn't guaranteed to survive a restart. Confirmed directly
+    // in production (Render's free tier restarted under memory pressure,
+    // and the next download attempt hit exactly this). The chunk content
+    // and embeddings are unaffected (they live in Postgres), so this is a
+    // "the original file isn't available for download" case, not data
+    // loss for chat/retrieval — worth a clean 404 instead of an unhandled
+    // crash either way.
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === 'ENOENT') {
+      return NextResponse.json(
+        { error: 'The original file is no longer available on this server (it may have restarted since upload). Chat answers sourced from this document are unaffected.' },
+        { status: 404 },
+      );
+    }
+    throw err;
+  }
 
   await logAuditEvent({
     action: 'DOCUMENT_DOWNLOADED',

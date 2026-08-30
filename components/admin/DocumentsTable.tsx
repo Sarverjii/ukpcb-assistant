@@ -123,12 +123,22 @@ function DocumentRow({ doc, roles }: { doc: Document; roles: Role[] }) {
       </td>
       <td className="px-3 py-2">
         <div className="flex flex-wrap gap-2">
-          <a
-            href={`/api/documents/${doc.id}/download`}
-            className="rounded-md border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800"
+          {/* Temporarily disabled: the local-disk storage provider doesn't
+              reliably survive a server restart on hosts with tight memory
+              limits (confirmed in production — a download 404'd after the
+              server restarted under memory pressure). Chat/retrieval are
+              unaffected either way, since chunk content and embeddings live
+              in Postgres, not on disk. Re-enable once storage is backed by
+              something that survives a restart (see StorageProvider in
+              lib/documents/storage.ts). */}
+          <button
+            type="button"
+            disabled
+            title="Temporarily unavailable — the original file may not have survived a server restart. Chat answers from this document are unaffected."
+            className="cursor-not-allowed rounded-md border border-zinc-200 dark:border-zinc-800 px-2 py-1 text-xs text-zinc-400 dark:text-zinc-600"
           >
             Download
-          </a>
+          </button>
           <button
             type="button"
             disabled={pending}
