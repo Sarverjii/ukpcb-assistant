@@ -71,7 +71,7 @@ const envSchema = z.object({
   // automatically once a Blob store is created and linked to the project.
   STORAGE_PROVIDER: z.enum(['local', 'vercel-blob']).default('local'),
   STORAGE_LOCAL_DIR: z.string().default('./storage/documents'),
-  UPLOAD_MAX_MB: z.coerce.number().int().positive().default(25),
+  UPLOAD_MAX_MB: z.coerce.number().int().positive().default(100),
   // The @vercel/blob SDK's plain put()/get()/head() calls pick this up from
   // process.env implicitly and reliably. Its handleUpload() helper (used
   // for the client-direct-upload token flow — see

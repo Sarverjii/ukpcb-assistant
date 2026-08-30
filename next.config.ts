@@ -43,14 +43,17 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   experimental: {
     // Proxy buffers request bodies to a default 10MB cap — separate from,
-    // and silently smaller than, our own UPLOAD_MAX_MB (25MB) application
-    // check in app/api/documents/upload/route.ts. Above 10MB the proxy
+    // and silently smaller than, our own UPLOAD_MAX_MB (100MB) application
+    // check in app/api/documents/upload/route.ts. Above the cap the proxy
     // truncates the body rather than erroring, which corrupts the
     // multipart form and surfaces as a confusing generic 500 instead of a
     // clean "file too large" message — found by actually uploading a
-    // 12MB file, not by reading the docs first. Set comfortably above
+    // 12MB file, not by reading the docs first. Only matters for the local
+    // single-request upload route (`next dev`/`local` storage) — production
+    // on Vercel uses the client-direct-to-Blob flow instead, which never
+    // routes the file through this proxy at all. Set comfortably above
     // UPLOAD_MAX_MB to leave room for multipart boundary/field overhead.
-    proxyClientMaxBodySize: '30mb',
+    proxyClientMaxBodySize: '110mb',
   },
 };
 
