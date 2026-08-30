@@ -18,6 +18,14 @@ let extractorPromise: Promise<FeatureExtractionPipeline> | null = null;
 function getExtractor(): Promise<FeatureExtractionPipeline> {
   // Memoized module-level singleton: the model is loaded once per server
   // process (first request pays the load cost), not once per request.
+  // device: 'wasm' would avoid the native ONNX runtime addon entirely, but
+  // @huggingface/transformers' Node-targeted build only accepts cuda/webgpu/
+  // cpu for `device` (confirmed directly — 'wasm' throws "Unsupported
+  // device"); the WASM backend is only reachable from its browser build.
+  // 'cpu' (the default, left unset here) is the only real option in Node,
+  // which needs the native onnxruntime-node addon — see next.config.ts's
+  // outputFileTracingIncludes for why that addon actually reaches Vercel's
+  // serverless bundle instead of failing with a missing .so file.
   extractorPromise ??= import('@huggingface/transformers').then(({ pipeline }) =>
     pipeline('feature-extraction', config.EMBEDDING_MODEL, {
       dtype: 'q8',

@@ -11,6 +11,26 @@ const nextConfig: NextConfig = {
   // uploading real PDFs at volume (all 20/20 in the test batch failed
   // identically), not by anticipating it — same fix as transformers above.
   serverExternalPackages: ['@huggingface/transformers', 'pdf-parse'],
+  // Vercel's build only deploys the files its file-tracer (@vercel/nft)
+  // can statically determine a route actually needs — not the full
+  // node_modules tree. onnxruntime-node's native addon selects its
+  // platform binary (libonnxruntime.so.1) at runtime by process.platform/
+  // arch, which nft's static import/require analysis can't see, so it got
+  // silently dropped from the deployed bundle: every document upload in
+  // production failed with "libonnxruntime.so.1: cannot open shared object
+  // file" — confirmed directly from the deployed app's own audit log, not
+  // anticipated. This forces those specific files back in. Deliberately
+  // NOT the whole onnxruntime-node/bin tree (513MB across every platform,
+  // including 315MB of CUDA/TensorRT provider libraries irrelevant on
+  // Vercel's CPU-only functions) — just the ~35MB linux/x64 CPU runtime
+  // this app actually uses.
+  outputFileTracingIncludes: {
+    '/**': [
+      './node_modules/onnxruntime-node/bin/napi-v6/linux/x64/libonnxruntime.so.1',
+      './node_modules/onnxruntime-node/bin/napi-v6/linux/x64/libonnxruntime_providers_shared.so',
+      './node_modules/onnxruntime-node/bin/napi-v6/linux/x64/onnxruntime_binding.node',
+    ],
+  },
   // Hides the dev-only route indicator badge (bottom-left by default).
   // Next.js still surfaces compile/runtime errors without it.
   devIndicators: false,
