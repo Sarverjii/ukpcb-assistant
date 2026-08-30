@@ -52,7 +52,7 @@ beforeAll(async () => {
 describe('retrieveAuthorizedChunks (DB layer)', () => {
   it('never returns a chunk above the caller\'s clearance rank, for every seeded rank', async () => {
     const embedder = getEmbeddingProvider();
-    const [embedding] = await embedder.embed(['What are the merger and acquisition plans?']);
+    const [embedding] = await embedder.embed(['What are the merger and acquisition plans?'], 'RETRIEVAL_QUERY');
 
     for (const { roleName } of TEST_USERS) {
       const user = await authContextFor(
@@ -70,7 +70,7 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
 
   it('the CXO document IS retrievable at CXO clearance and NOT at lower ranks', async () => {
     const embedder = getEmbeddingProvider();
-    const [embedding] = await embedder.embed(['Northwind acquisition due diligence']);
+    const [embedding] = await embedder.embed(['Northwind acquisition due diligence'], 'RETRIEVAL_QUERY');
 
     const engineerCtx = await authContextFor('engineer@asktest.local');
     const cxoCtx = await authContextFor('cxo@asktest.local');
@@ -108,7 +108,7 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
       where: { name: 'Board Merger Plans' },
     });
     const embedder = getEmbeddingProvider();
-    const [embedding] = await embedder.embed(['merger plans']);
+    const [embedding] = await embedder.embed(['merger plans'], 'RETRIEVAL_QUERY');
 
     const engineerCtx = await authContextFor('engineer@asktest.local');
     const asEngineer = await retrieveChunksForDocuments(

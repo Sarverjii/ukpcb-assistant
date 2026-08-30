@@ -27,7 +27,7 @@ export async function processDocument(documentId: string): Promise<void> {
     }
 
     const embedder = getEmbeddingProvider();
-    const vectors = await embedder.embed(chunks.map((c) => c.content));
+    const vectors = await embedder.embed(chunks.map((c) => c.content), 'RETRIEVAL_DOCUMENT');
 
     // clearanceLevel is copied onto every chunk here — see the
     // denormalization note in prisma/schema.prisma and lib/db/queries/chunks.ts.

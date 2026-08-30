@@ -44,9 +44,25 @@ const envSchema = z.object({
   // it. Leave unset to disable the fallback (a 503 just fails the request).
   GEMINI_FALLBACK_MODEL: z.string().optional(),
 
-  EMBEDDING_PROVIDER: z.enum(['local', 'openai']).default('local'),
-  EMBEDDING_MODEL: z.string().default('Xenova/all-MiniLM-L6-v2'),
-  EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(384),
+  // "gemini" is the default: it reuses the same GEMINI_API_KEY the "gemini"
+  // LLM_PROVIDER default already requires (no new credential), and unlike
+  // "local" it has zero in-process memory footprint — running the local
+  // model's ONNX runtime repeatedly is what crashed a real deployment on a
+  // memory-constrained host (confirmed directly: the process OOM'd and the
+  // platform auto-restarted it mid-request). "local" (free, no API key at
+  // all, but needs the RAM to run a model in-process — fine for local dev
+  // or a host with real headroom) and "openai" remain available. See
+  // lib/embeddings/geminiEmbeddingProvider.ts for the implementation, which
+  // mirrors a working production implementation in a sibling project rather
+  // than being written from scratch.
+  EMBEDDING_PROVIDER: z.enum(['local', 'gemini', 'openai']).default('gemini'),
+  // Defaults matched to EMBEDDING_PROVIDER's default (gemini). Switching
+  // EMBEDDING_PROVIDER back to "local" needs EMBEDDING_MODEL=
+  // Xenova/all-MiniLM-L6-v2 and EMBEDDING_DIMENSIONS=384 set explicitly —
+  // the two are not interchangeable in the same vector(N) column without a
+  // migration + re-embedding every existing chunk.
+  EMBEDDING_MODEL: z.string().default('gemini-embedding-001'),
+  EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().default(768),
   OPENAI_API_KEY: z.string().optional(),
 
   // "local" (disk) only works on a host with a persistent, shared

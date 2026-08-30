@@ -155,7 +155,7 @@ model DocumentChunk {
   // active EmbeddingProvider. Prisma can't express the vector type directly,
   // so it's declared Unsupported and only ever touched via $queryRaw
   // (see lib/db/queries/chunks.ts and the pgvector migration SQL).
-  embedding Unsupported("vector(384)")
+  embedding Unsupported("vector(768)")
 
   // Denormalized from Document.clearanceLevel at insert time — see the
   // module-level note above. This is the column every retrieval query

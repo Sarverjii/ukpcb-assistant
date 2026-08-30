@@ -188,11 +188,15 @@ each for what changing providers involves:
 - `lib/llm/` — `LLMProvider`, three implementations (`geminiProvider.ts`,
   `ollamaProvider.ts`, `anthropicProvider.ts`) selected via `LLM_PROVIDER` —
   see the table above.
-- `lib/embeddings/` — `EmbeddingProvider`, currently a free local model
-  (`Xenova/all-MiniLM-L6-v2`, no API key needed). Swap to OpenAI later via
-  `EMBEDDING_PROVIDER=openai` once `lib/embeddings/openaiProvider.ts` is
-  implemented — note this requires re-embedding existing chunks, since the
-  vector dimensionality changes.
+- `lib/embeddings/` — `EmbeddingProvider`. Default is `gemini`
+  (`gemini-embedding-001`, 768-dim, reuses `GEMINI_API_KEY` — no local
+  memory footprint). `local` (`Xenova/all-MiniLM-L6-v2`, 384-dim, no API
+  key needed) is still available for local dev, but running it repeatedly
+  is what crashed a real deployment on a memory-constrained host — see
+  `lib/embeddings/geminiEmbeddingProvider.ts`'s doc comment. `openai` is a
+  stub. Switching between any of them needs a schema migration
+  (`vector(N)` in `prisma/schema.prisma`) and re-embedding every existing
+  chunk — the vectors aren't interchangeable across models.
 - `lib/documents/storage.ts` — `StorageProvider`, local disk (dev) or
   `vercel-blob` (`lib/documents/vercelBlobStorage.ts`) via `STORAGE_PROVIDER`.
 
@@ -200,6 +204,12 @@ each for what changing providers involves:
 
 This is the deployment path actually tested for this project. Both have
 free tiers with no card required.
+
+Note: `EMBEDDING_PROVIDER` defaults to `gemini` (hosted API, reuses
+`GEMINI_API_KEY`) rather than `local` — the local model needs to run
+in-process, which doesn't work well in a serverless function at all
+(see the `EmbeddingProvider` note above). No extra setup needed here; it's
+already the default.
 
 1. **Database — [Neon](https://neon.tech)**: create a project, then in the
    SQL editor run `CREATE EXTENSION IF NOT EXISTS vector;` once (pgvector

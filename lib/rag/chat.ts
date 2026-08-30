@@ -80,7 +80,7 @@ export async function answerQuestion(
   conversationHistory: ChatTurn[],
 ): Promise<AnswerResult> {
   const embedder = getEmbeddingProvider();
-  const [queryEmbedding] = await embedder.embed([question]);
+  const [queryEmbedding] = await embedder.embed([question], 'RETRIEVAL_QUERY');
 
   // Document *names/descriptions*, not content — fetched every turn now,
   // regardless of whether vector retrieval also found relevant chunk

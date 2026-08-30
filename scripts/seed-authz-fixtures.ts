@@ -115,7 +115,7 @@ export async function seedFixtureDocuments() {
     });
 
     const chunks = chunkText(doc.content, { size: 1000, overlap: 150 });
-    const vectors = await embedder.embed(chunks.map((c) => c.content));
+    const vectors = await embedder.embed(chunks.map((c) => c.content), 'RETRIEVAL_DOCUMENT');
     await insertDocumentChunks(document.id, chunks, vectors, role.hierarchyRank);
     await prisma.document.update({ where: { id: document.id }, data: { status: 'READY' } });
   }
