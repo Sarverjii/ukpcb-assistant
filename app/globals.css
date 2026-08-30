@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+/* Class-based dark mode: dark only ever applies when the .dark class is on
+ * <html> (see app/layout.tsx, which sets it server-side from the user's
+ * DB-stored preference via lib/theme.ts) — never from OS/browser
+ * prefers-color-scheme. This is what makes light the true default rather
+ * than "default until your OS says otherwise". */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #ffffff;
+  --foreground: #0f1115;
+}
+
+/*
+ * Brand palette, derived from the Evon logo mark (public/logo-mark.svg —
+ * #034475 / #12507A navy). This is the app's one accent color: primary
+ * actions, focus rings, active/selected states, and the sidebar all pull
+ * from this scale rather than a generic UI-kit blue, so the product reads
+ * as Evon's rather than a template's. Paired with a true-neutral gray scale
+ * (Tailwind's zinc, not slate) for surfaces — slate carries a faint blue-
+ * gray cast that fights the brand blue instead of setting it off; zinc
+ * reads as genuine black/white/gray, closer to "black with blue" than
+ * "blue-gray with blue".
+ */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-geist-mono);
+
+  --color-brand-50: #eef5fa;
+  --color-brand-100: #d8e8f3;
+  --color-brand-200: #b3d2e8;
+  --color-brand-300: #82b3d6;
+  --color-brand-400: #4f8fbe;
+  --color-brand-500: #2c6fa0;
+  --color-brand-600: #14507f;
+  --color-brand-700: #0f3f68;
+  --color-brand-800: #0c3354;
+  --color-brand-900: #092841;
+  --color-brand-950: #05192c;
+}
+
+/* Dark theme — only when .dark is present (see @custom-variant above), never
+ * from system preference. True near-black rather than the previous
+ * navy-tinted dark, so the brand blue reads as a deliberate accent against
+ * black rather than blending into an already-blue-ish background. */
+:root.dark {
+  --background: #08090a;
+  --foreground: #edeef0;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/*
+ * Minimal markdown typography for assistant chat messages
+ * (components/chat/Markdown.tsx). Element-level styling (lists, code,
+ * headings, links, tables) is handled per-tag via ReactMarkdown's
+ * `components` prop; this just fixes the vertical rhythm between block
+ * elements that markdown output otherwise renders with no spacing at all.
+ */
+.prose-chat > :first-child {
+  margin-top: 0;
+}
+.prose-chat > :last-child {
+  margin-bottom: 0;
+}
+.prose-chat p,
+.prose-chat ul,
+.prose-chat ol,
+.prose-chat blockquote,
+.prose-chat pre,
+.prose-chat table,
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  margin-top: 0.75em;
+  margin-bottom: 0.75em;
+}
+.prose-chat li > p {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}

@@ -1,0 +1,30 @@
+import type { NextConfig } from 'next';
+
+const nextConfig: NextConfig = {
+  // @huggingface/transformers ships native ONNX runtime bindings and large
+  // WASM assets — let Node require() it directly instead of having
+  // Turbopack try to bundle it (see lib/embeddings/localTransformersProvider.ts).
+  // pdf-parse (via pdfjs-dist) ships a pdf.worker.mjs file it loads by
+  // relative path at runtime — Turbopack bundling it moved/omitted that
+  // file, breaking every PDF upload with "Setting up fake worker failed:
+  // Cannot find module '.../pdf.worker.mjs'". Found this by actually
+  // uploading real PDFs at volume (all 20/20 in the test batch failed
+  // identically), not by anticipating it — same fix as transformers above.
+  serverExternalPackages: ['@huggingface/transformers', 'pdf-parse'],
+  // Hides the dev-only route indicator badge (bottom-left by default).
+  // Next.js still surfaces compile/runtime errors without it.
+  devIndicators: false,
+  experimental: {
+    // Proxy buffers request bodies to a default 10MB cap — separate from,
+    // and silently smaller than, our own UPLOAD_MAX_MB (25MB) application
+    // check in app/api/documents/upload/route.ts. Above 10MB the proxy
+    // truncates the body rather than erroring, which corrupts the
+    // multipart form and surfaces as a confusing generic 500 instead of a
+    // clean "file too large" message — found by actually uploading a
+    // 12MB file, not by reading the docs first. Set comfortably above
+    // UPLOAD_MAX_MB to leave room for multipart boundary/field overhead.
+    proxyClientMaxBodySize: '30mb',
+  },
+};
+
+export default nextConfig;

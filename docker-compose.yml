@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ask-evon-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: evon
+      POSTGRES_PASSWORD: evon
+      POSTGRES_DB: ask_evon
+    ports:
+      # Host port 5433, not 5432 — this machine already runs a native
+      # Postgres service on 5432; mapping around it avoids touching that.
+      - '5433:5432'
+    volumes:
+      - ask-evon-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  ask-evon-postgres-data:
