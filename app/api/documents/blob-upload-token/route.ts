@@ -44,25 +44,20 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const body = (await request.json()) as HandleUploadBody;
 
-  // TEMP DIAGNOSTIC — remove once the token-lookup issue is understood.
-  if (request.headers.get('x-diag') === '1') {
-    return NextResponse.json({
-      configTokenPresent: !!config.BLOB_READ_WRITE_TOKEN,
-      configTokenLength: config.BLOB_READ_WRITE_TOKEN?.length ?? 0,
-      envTokenPresent: !!process.env.BLOB_READ_WRITE_TOKEN,
-      envTokenLength: process.env.BLOB_READ_WRITE_TOKEN?.length ?? 0,
-      blobStoreId: process.env.BLOB_STORE_ID ?? null,
-      vercelOidcTokenPresent: !!process.env.VERCEL_OIDC_TOKEN,
-    });
-  }
-
   try {
     const jsonResponse = await handleUpload({
       body,
       request,
-      // See config.ts's doc comment on BLOB_READ_WRITE_TOKEN — passed
-      // explicitly rather than relying on handleUpload()'s own default
-      // env-var lookup, which didn't reliably find it in production.
+      // Explicit rather than relying on handleUpload()'s own default env-var
+      // lookup. Root-caused via a temporary diagnostic in this route
+      // (confirmed with real request/response data, not guessed): this
+      // project's Blob store was connected via Vercel's newer flow, which
+      // provisions BLOB_STORE_ID and BLOB_WEBHOOK_PUBLIC_KEY automatically
+      // but does NOT auto-generate a classic BLOB_READ_WRITE_TOKEN — and
+      // handleUpload()'s client-token derivation has no OIDC/BLOB_STORE_ID
+      // fallback the way plain put()/get() do, so it hard-requires this
+      // token to exist as an actual env var, added manually from the Blob
+      // store's own settings page.
       token: config.BLOB_READ_WRITE_TOKEN,
       onBeforeGenerateToken: async (_pathname, clientPayload) => {
         // Mirrors the same self-clearance check the old route made against
