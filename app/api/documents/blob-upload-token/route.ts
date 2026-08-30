@@ -44,6 +44,18 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const body = (await request.json()) as HandleUploadBody;
 
+  // TEMP DIAGNOSTIC — remove once the token-lookup issue is understood.
+  if (request.headers.get('x-diag') === '1') {
+    return NextResponse.json({
+      configTokenPresent: !!config.BLOB_READ_WRITE_TOKEN,
+      configTokenLength: config.BLOB_READ_WRITE_TOKEN?.length ?? 0,
+      envTokenPresent: !!process.env.BLOB_READ_WRITE_TOKEN,
+      envTokenLength: process.env.BLOB_READ_WRITE_TOKEN?.length ?? 0,
+      blobStoreId: process.env.BLOB_STORE_ID ?? null,
+      vercelOidcTokenPresent: !!process.env.VERCEL_OIDC_TOKEN,
+    });
+  }
+
   try {
     const jsonResponse = await handleUpload({
       body,
