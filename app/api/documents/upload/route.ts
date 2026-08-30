@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { getAuthContext, UnauthenticatedError } from '@/lib/auth/session';
 import { requireCanUploadDocuments, ForbiddenError } from '@/lib/auth/rbac';
 import { getStorageProvider } from '@/lib/documents/storage';
@@ -7,6 +7,13 @@ import { createDocument } from '@/lib/db/queries/documents';
 import { processDocument } from '@/lib/documents/pipeline';
 import { logAuditEvent } from '@/lib/audit/log';
 import { config } from '@/lib/config';
+
+// Document processing (extract → chunk → embed → insert) can take well
+// past a serverless platform's default timeout on a cold instance — the
+// local embedding model may need to download on first use (see
+// lib/embeddings/localTransformersProvider.ts). 60s is comfortably above
+// what a warm instance needs and within Vercel Hobby's ceiling.
+export const maxDuration = 60;
 
 export async function POST(request: Request) {
   let ctx;
@@ -100,9 +107,20 @@ export async function POST(request: Request) {
 
   // Fire-and-forget: MVP-scale synchronous processing without blocking the
   // HTTP response. The client polls the status endpoint until READY/FAILED.
-  processDocument(document.id).catch((err) => {
-    console.error('[documents] processing failed', document.id, err);
-  });
+  // Wrapped in after() rather than a bare, unawaited call — on Vercel, a
+  // serverless function can be frozen/terminated the moment its response is
+  // sent, with no guarantee an unawaited promise keeps running afterward.
+  // Confirmed directly in production: uploads got stuck in PROCESSING
+  // forever, never reaching READY or FAILED — the pipeline's own try/catch
+  // (see lib/documents/pipeline.ts) never even got the chance to run.
+  // after() (powered by Vercel's waitUntil()) keeps the instance alive
+  // until the callback settles, without making the client wait for it in
+  // the response.
+  after(() =>
+    processDocument(document.id).catch((err) => {
+      console.error('[documents] processing failed', document.id, err);
+    }),
+  );
 
   return NextResponse.json({ id: document.id, status: document.status }, { status: 201 });
 }

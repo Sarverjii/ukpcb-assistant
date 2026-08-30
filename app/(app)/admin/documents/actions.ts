@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { after } from 'next/server';
 import { getAuthContext } from '@/lib/auth/session';
 import { requireAdmin } from '@/lib/auth/rbac';
 import { logAuditEvent } from '@/lib/audit/log';
@@ -93,9 +94,15 @@ export async function replaceDocumentAction(formData: FormData): Promise<ActionR
     resource: documentId,
   });
 
-  processDocument(documentId).catch((err) => {
-    console.error('[documents] reprocessing failed', documentId, err);
-  });
+  // See the matching comment in app/api/documents/upload/route.ts: a bare
+  // unawaited call here can get killed mid-flight on Vercel the moment this
+  // action's response is sent. after() (page-level maxDuration set in
+  // app/(app)/admin/documents/page.tsx) keeps it alive until it settles.
+  after(() =>
+    processDocument(documentId).catch((err) => {
+      console.error('[documents] reprocessing failed', documentId, err);
+    }),
+  );
 
   revalidatePath('/admin/documents');
   return {};
