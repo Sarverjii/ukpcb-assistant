@@ -1,6 +1,7 @@
 import { listDocumentsWithUploader } from '@/lib/db/queries/documents';
 import { listRolesByRank } from '@/lib/db/queries/users';
 import { DocumentsTable } from '@/components/admin/DocumentsTable';
+import { config } from '@/lib/config';
 
 // Next.js requires maxDuration at the PAGE level (not the action file
 // itself) to extend the default Server Action timeout — this page's
@@ -26,6 +27,7 @@ export default async function AdminDocumentsPage() {
         updatedAt: d.updatedAt.toISOString(),
       }))}
       roles={roles.map((r) => ({ hierarchyRank: r.hierarchyRank, name: r.name }))}
+      useClientUpload={config.STORAGE_PROVIDER === 'vercel-blob'}
     />
   );
 }

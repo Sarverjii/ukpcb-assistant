@@ -1,11 +1,69 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { upload } from '@vercel/blob/client';
 
 type Role = { name: string; hierarchyRank: number };
 type Status = 'idle' | 'uploading' | 'PENDING' | 'PROCESSING' | 'READY' | 'FAILED';
 
-export function UploadForm({ roles }: { roles: Role[] }) {
+/**
+ * uploadViaBlob bypasses this app's own server for the file bytes entirely
+ * — the browser uploads straight to Vercel Blob (via
+ * app/api/documents/blob-upload-token's short-lived token), then a small
+ * JSON POST to /api/documents/finalize-upload creates the Document row.
+ * Vercel's serverless functions reject request bodies above ~4.5MB, a hard
+ * platform ceiling confirmed directly (real corpus documents 8-25MB all
+ * 413'd through the old file-through-the-server route) — this is the fix,
+ * not a workaround for something UPLOAD_MAX_MB or Next config could ever
+ * have addressed on its own.
+ *
+ * Only used when useClientUpload is true (STORAGE_PROVIDER=vercel-blob —
+ * see app/(app)/documents/upload/page.tsx). On local disk storage there's
+ * no equivalent direct-upload target, so the plain single-request route
+ * remains the only path there, which is fine: that path only hits Vercel's
+ * ceiling on Vercel, and local-disk deployments generally aren't on Vercel
+ * in the first place (see StorageProvider's own doc comment).
+ */
+async function uploadViaBlob(formData: FormData): Promise<{ id: string; status: string } | { error: string }> {
+  const file = formData.get('file') as File;
+  const clearanceLevel = formData.get('clearanceLevel') as string;
+  const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+  const pathname = `documents/${crypto.randomUUID()}${ext}`;
+
+  let blob;
+  try {
+    blob = await upload(pathname, file, {
+      access: 'private',
+      handleUploadUrl: '/api/documents/blob-upload-token',
+      clientPayload: JSON.stringify({ clearanceLevel }),
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Upload failed.' };
+  }
+
+  const finalizeRes = await fetch('/api/documents/finalize-upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      pathname: blob.pathname,
+      mimeType: file.type,
+      fileSizeBytes: file.size,
+      name: formData.get('name'),
+      description: formData.get('description') || undefined,
+      clearanceLevel: Number(clearanceLevel),
+      department: formData.get('department') || undefined,
+      tags: String(formData.get('tags') ?? '')
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean),
+    }),
+  });
+  const data = await finalizeRes.json();
+  if (!finalizeRes.ok) return { error: data.error ?? 'Upload failed.' };
+  return data;
+}
+
+export function UploadForm({ roles, useClientUpload }: { roles: Role[]; useClientUpload: boolean }) {
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -25,10 +83,11 @@ export function UploadForm({ roles }: { roles: Role[] }) {
 
     const formData = new FormData(e.currentTarget);
 
-    const res = await fetch('/api/documents/upload', { method: 'POST', body: formData });
-    const data = await res.json();
+    const data = useClientUpload
+      ? await uploadViaBlob(formData)
+      : await fetch('/api/documents/upload', { method: 'POST', body: formData }).then((r) => r.json());
 
-    if (!res.ok) {
+    if ('error' in data) {
       setError(data.error ?? 'Upload failed.');
       setStatus('idle');
       return;

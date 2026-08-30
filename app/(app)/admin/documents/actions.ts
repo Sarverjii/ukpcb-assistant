@@ -108,6 +108,55 @@ export async function replaceDocumentAction(formData: FormData): Promise<ActionR
   return {};
 }
 
+/**
+ * Client-direct-upload counterpart to replaceDocumentAction, for the same
+ * reason app/api/documents/finalize-upload/route.ts exists alongside the
+ * old upload route: Vercel rejects request bodies above ~4.5MB, and
+ * replaceDocumentAction's FormData (containing the file itself) is subject
+ * to that exact same ceiling as a Server Action. By the time this runs, the
+ * browser has already uploaded the file directly to Vercel Blob — this
+ * only receives the resulting pathname (a string), never the file bytes.
+ */
+export async function finalizeReplaceDocumentAction(
+  documentId: string,
+  pathname: string,
+  mimeType: string,
+  fileSizeBytes: number,
+): Promise<ActionResult> {
+  const ctx = await requireAdminCtx();
+
+  if (!documentId || !pathname) {
+    return { error: 'Missing document or file.' };
+  }
+  if (!SUPPORTED_MIME_TYPES.includes(mimeType)) {
+    return { error: `Unsupported file type: ${mimeType || 'unknown'}` };
+  }
+  if (!Number.isFinite(fileSizeBytes) || fileSizeBytes <= 0) {
+    return { error: 'Invalid file size.' };
+  }
+
+  await getDocument(documentId); // 404s (throws) if it doesn't exist
+
+  await deleteChunksForDocument(documentId);
+  await updateDocumentFile(documentId, { fileKey: pathname, mimeType, fileSizeBytes });
+
+  await logAuditEvent({
+    action: 'DOCUMENT_REPLACED',
+    result: 'SUCCESS',
+    userId: ctx.userId,
+    resource: documentId,
+  });
+
+  after(() =>
+    processDocument(documentId).catch((err) => {
+      console.error('[documents] reprocessing failed', documentId, err);
+    }),
+  );
+
+  revalidatePath('/admin/documents');
+  return {};
+}
+
 async function requireAdminCtx() {
   const ctx = await getAuthContext();
   await requireAdmin(ctx);

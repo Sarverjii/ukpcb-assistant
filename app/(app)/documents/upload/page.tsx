@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getAuthContext } from '@/lib/auth/session';
 import { prisma } from '@/lib/db/prisma';
+import { config } from '@/lib/config';
 import { UploadForm } from '@/components/documents/UploadForm';
 
 export default async function DocumentUploadPage() {
@@ -26,7 +27,7 @@ export default async function DocumentUploadPage() {
         will ever see it — including in AI answers.
       </p>
       <div className="mt-6">
-        <UploadForm roles={availableRoles} />
+        <UploadForm roles={availableRoles} useClientUpload={config.STORAGE_PROVIDER === 'vercel-blob'} />
       </div>
     </main>
   );

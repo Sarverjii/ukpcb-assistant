@@ -1,10 +1,12 @@
 'use client';
 
 import { useRef, useState, useTransition } from 'react';
+import { upload } from '@vercel/blob/client';
 import {
   changeDocumentClearanceAction,
   deleteDocumentAction,
   replaceDocumentAction,
+  finalizeReplaceDocumentAction,
 } from '@/app/(app)/admin/documents/actions';
 
 type Document = {
@@ -19,7 +21,15 @@ type Document = {
 };
 type Role = { hierarchyRank: number; name: string };
 
-export function DocumentsTable({ documents, roles }: { documents: Document[]; roles: Role[] }) {
+export function DocumentsTable({
+  documents,
+  roles,
+  useClientUpload,
+}: {
+  documents: Document[];
+  roles: Role[];
+  useClientUpload: boolean;
+}) {
   return (
     <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
       <table className="w-full text-left text-sm">
@@ -36,7 +46,7 @@ export function DocumentsTable({ documents, roles }: { documents: Document[]; ro
         </thead>
         <tbody>
           {documents.map((d) => (
-            <DocumentRow key={d.id} doc={d} roles={roles} />
+            <DocumentRow key={d.id} doc={d} roles={roles} useClientUpload={useClientUpload} />
           ))}
           {documents.length === 0 && (
             <tr>
@@ -51,7 +61,15 @@ export function DocumentsTable({ documents, roles }: { documents: Document[]; ro
   );
 }
 
-function DocumentRow({ doc, roles }: { doc: Document; roles: Role[] }) {
+function DocumentRow({
+  doc,
+  roles,
+  useClientUpload,
+}: {
+  doc: Document;
+  roles: Role[];
+  useClientUpload: boolean;
+}) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -82,15 +100,39 @@ function DocumentRow({ doc, roles }: { doc: Document; roles: Role[] }) {
     fileInputRef.current?.click();
   }
 
+  async function replaceViaBlob(file: File): Promise<{ error?: string }> {
+    const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
+    const pathname = `documents/${crypto.randomUUID()}${ext}`;
+    try {
+      const blob = await upload(pathname, file, {
+        access: 'private',
+        handleUploadUrl: '/api/documents/blob-upload-token',
+        clientPayload: JSON.stringify({ clearanceLevel: doc.clearanceLevel }),
+      });
+      return finalizeReplaceDocumentAction(doc.id, blob.pathname, file.type, file.size);
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Upload failed.' };
+    }
+  }
+
   function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     setError(null);
-    const formData = new FormData();
-    formData.set('documentId', doc.id);
-    formData.set('file', file);
     startTransition(async () => {
-      const result = await replaceDocumentAction(formData);
+      // See UploadForm.tsx's uploadViaBlob for why this branch exists:
+      // Vercel rejects request bodies above ~4.5MB, so a large replacement
+      // file has to go straight from the browser to Vercel Blob rather
+      // than through this app's own server.
+      let result: { error?: string };
+      if (useClientUpload) {
+        result = await replaceViaBlob(file);
+      } else {
+        const formData = new FormData();
+        formData.set('documentId', doc.id);
+        formData.set('file', file);
+        result = await replaceDocumentAction(formData);
+      }
       if (result.error) setError(result.error);
       e.target.value = '';
     });
