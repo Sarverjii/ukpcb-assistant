@@ -24,11 +24,18 @@ const nextConfig: NextConfig = {
   // including 315MB of CUDA/TensorRT provider libraries irrelevant on
   // Vercel's CPU-only functions) — just the ~35MB linux/x64 CPU runtime
   // this app actually uses.
+  // Same story, different file: pdf-parse (via pdfjs-dist) loads its worker
+  // script by relative path at runtime rather than a statically-analyzable
+  // import, so nft misses it too — confirmed directly, every PDF upload in
+  // production failed with "Setting up fake worker failed: Cannot find
+  // module '.../pdf.worker.mjs'" even after the onnxruntime fix above.
   outputFileTracingIncludes: {
     '/**': [
       './node_modules/onnxruntime-node/bin/napi-v6/linux/x64/libonnxruntime.so.1',
       './node_modules/onnxruntime-node/bin/napi-v6/linux/x64/libonnxruntime_providers_shared.so',
       './node_modules/onnxruntime-node/bin/napi-v6/linux/x64/onnxruntime_binding.node',
+      './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
+      './node_modules/pdfjs-dist/build/pdf.worker.mjs',
     ],
   },
   // Hides the dev-only route indicator badge (bottom-left by default).
