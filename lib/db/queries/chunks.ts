@@ -133,6 +133,19 @@ export async function insertDocumentChunks(
           (gen_random_uuid()::text, ${documentId}, ${chunk.index}, ${chunk.content}, ${vec}::vector, ${clearanceLevel}, now())
       `;
     }),
+    // Prisma's default interactive-transaction timeout is 5000ms, covering
+    // the WHOLE batch, not each statement — fine against a local Postgres,
+    // but confirmed directly in production against a remote DB (Neon):
+    // large documents (30-40 chunks) blew past 5s purely on accumulated
+    // network round-trip latency per INSERT, failing with "A rollback
+    // cannot be executed on an expired transaction." Generous headroom
+    // here rather than tuning it precisely to corpus size, since a
+    // document's chunk count isn't bounded by anything in this app — kept
+    // noticeably below the 60s maxDuration on the upload route (and the
+    // admin "Replace" action's page) so a slow transaction fails with this
+    // module's own clear error well before the platform kills the whole
+    // request for running too long.
+    { timeout: 45_000 },
   );
 }
 
