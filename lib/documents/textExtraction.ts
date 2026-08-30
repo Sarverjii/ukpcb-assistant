@@ -3,8 +3,27 @@ import mammoth from 'mammoth';
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
+// pdfjs-dist (used by pdf-parse) tracks the current transformation matrix
+// via the browser's DOMMatrix API while walking a PDF's content stream —
+// needed even for plain text extraction, since PDFs interleave text and
+// graphics operators and text POSITIONING depends on that matrix. Node has
+// no DOMMatrix at all. Confirmed directly in production: PDFs with more
+// complex content streams (embedded images/graphics, not just plain text)
+// failed with "ReferenceError: DOMMatrix is not defined" — a subset, not
+// every PDF, since simpler ones never exercise that code path. `dommatrix`
+// is a pure-JS, spec-compliant shim (no native bindings, unlike a real
+// canvas/DOM implementation) — installed lazily, once, right before the
+// first PDF is ever parsed (matches the existing lazy `import('pdf-parse')`
+// pattern below rather than a top-level await).
+async function ensureDomMatrixPolyfill(): Promise<void> {
+  if (typeof globalThis.DOMMatrix !== 'undefined') return;
+  const CSSMatrix = (await import('dommatrix')).default;
+  globalThis.DOMMatrix = CSSMatrix;
+}
+
 export async function extractText(buffer: Buffer, mimeType: string): Promise<string> {
   if (mimeType === 'application/pdf') {
+    await ensureDomMatrixPolyfill();
     // pdf-parse v2 API: instantiate PDFParse, call getText(), then destroy()
     // to free the underlying worker/memory (see node_modules/pdf-parse README
     // — this is a different API shape from pdf-parse v1's bare function call).
