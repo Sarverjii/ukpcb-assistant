@@ -72,6 +72,16 @@ const envSchema = z.object({
   STORAGE_PROVIDER: z.enum(['local', 'vercel-blob']).default('local'),
   STORAGE_LOCAL_DIR: z.string().default('./storage/documents'),
   UPLOAD_MAX_MB: z.coerce.number().int().positive().default(25),
+  // The @vercel/blob SDK's plain put()/get()/head() calls pick this up from
+  // process.env implicitly and reliably. Its handleUpload() helper (used
+  // for the client-direct-upload token flow — see
+  // app/api/documents/blob-upload-token/route.ts) does NOT reliably do the
+  // same in practice — confirmed directly in production: a real token
+  // request failed with "No read-write token found" even though the exact
+  // same deployment's storage.save()/read() calls were already working.
+  // Read explicitly here and passed to handleUpload({ token }) rather than
+  // relying on its implicit default.
+  BLOB_READ_WRITE_TOKEN: z.string().optional(),
 });
 
 export const config = envSchema.parse(process.env);

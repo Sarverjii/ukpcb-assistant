@@ -48,6 +48,10 @@ export async function POST(request: Request): Promise<NextResponse> {
     const jsonResponse = await handleUpload({
       body,
       request,
+      // See config.ts's doc comment on BLOB_READ_WRITE_TOKEN — passed
+      // explicitly rather than relying on handleUpload()'s own default
+      // env-var lookup, which didn't reliably find it in production.
+      token: config.BLOB_READ_WRITE_TOKEN,
       onBeforeGenerateToken: async (_pathname, clientPayload) => {
         // Mirrors the same self-clearance check the old route made against
         // the actual upload — enforced here too so a caller can't even get
