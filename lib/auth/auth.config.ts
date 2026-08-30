@@ -18,6 +18,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
   session: { strategy: 'jwt' },
   pages: { signIn: '/login' },
+  // Auth.js auto-trusts the Host header only on deployment platforms it
+  // specifically recognizes (Vercel is one) — anywhere else, including
+  // Render, it defaults to rejecting every request with "UntrustedHost"
+  // rather than silently trusting an unrecognized proxy. Confirmed directly
+  // from Render's own deploy logs. Safe to trust here because the actual
+  // authorization boundary never depends on the Host header — every
+  // protected call re-derives role/clearance fresh from Postgres via
+  // getAuthContext() (see the file-level comment above), so this only
+  // affects Auth.js's own redirect/cookie URL construction, not who's
+  // allowed to do what.
+  trustHost: true,
   providers: [
     Credentials({
       credentials: {
