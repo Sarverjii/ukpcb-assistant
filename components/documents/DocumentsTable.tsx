@@ -9,6 +9,7 @@ import {
   finalizeReplaceDocumentAction,
 } from '@/app/(app)/knowledge-base/actions';
 import { LocalTime } from '@/components/admin/LocalTime';
+import { ACCEPTED_EXTENSIONS } from '@/lib/documents/uploadClient';
 
 export type DocumentRow = {
   id: string;
@@ -255,7 +256,7 @@ function DocumentRow({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.docx,.pptx,.txt,.md"
+            accept={ACCEPTED_EXTENSIONS}
             className="hidden"
             onChange={handleFileSelected}
           />

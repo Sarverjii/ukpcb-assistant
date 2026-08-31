@@ -99,7 +99,8 @@ export function UploadForm({
         Drag and drop files, or click to browse
       </p>
       <p className="text-xs text-zinc-400">
-        PDF, DOCX, PPTX, TXT, or MD · up to {uploadMaxMb}MB each · select multiple to bulk-upload
+        PDF, Word, PowerPoint, Excel, CSV, TXT, MD, RTF, HTML, JSON, EPUB, or OpenDocument · up to{' '}
+        {uploadMaxMb}MB each · select multiple to bulk-upload
       </p>
       <input
         ref={fileInputRef}

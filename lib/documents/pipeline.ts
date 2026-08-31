@@ -1,14 +1,13 @@
 import { getDocument, setDocumentStatus, setDocumentPreviewFileKey } from '@/lib/db/queries/documents';
 import { insertDocumentChunks } from '@/lib/db/queries/chunks';
 import { getStorageProvider } from '@/lib/documents/storage';
-import { extractStructuredText } from '@/lib/documents/textExtraction';
+import { extractStructuredText, MULTI_SEGMENT_MIME_TYPES } from '@/lib/documents/textExtraction';
 import { chunkText } from '@/lib/documents/chunking';
 import { getEmbeddingProvider } from '@/lib/embeddings';
 import { logAuditEvent } from '@/lib/audit/log';
 import { renderPagesToPdf, type RenderablePage } from '@/lib/documents/pdfRender';
 
 const PDF_MIME = 'application/pdf';
-const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
 /**
  * Runs synchronously in the request for MVP scale (~100 documents). Written
@@ -28,18 +27,19 @@ export async function processDocument(documentId: string): Promise<void> {
     // extractStructuredText's own docs. Chunking each segment independently
     // means a chunk never straddles a page/slide boundary.
     const segments = await extractStructuredText(buffer, doc.mimeType);
-    const hasNativePagination = doc.mimeType === PDF_MIME || doc.mimeType === PPTX_MIME;
+    const hasNativePagination = MULTI_SEGMENT_MIME_TYPES.has(doc.mimeType);
 
     const chunks: { index: number; content: string; pageNumber: number | null }[] = [];
     for (const segment of segments) {
       for (const c of chunkText(segment.text, { size: 1000, overlap: 150 })) {
-        // PDF/PPTX: the chunk inherits its segment's real page/slide
-        // number. DOCX/TXT/MD have no such number in the source file at
-        // all (segment.pageNumber is null) — every chunk gets its own
-        // sequential page instead, one chunk per generated preview page
-        // (below), so a citation still always has somewhere exact to
-        // point to. There's always exactly one segment for these formats,
-        // so this numbers every chunk in the document 1..N with no gaps.
+        // PDF/PPTX/ODP/XLSX/ODS/CSV: the chunk inherits its segment's real
+        // page/slide/sheet number. Every other format has no such number
+        // in the source file at all (segment.pageNumber is null) — every
+        // chunk gets its own sequential page instead, one chunk per
+        // generated preview page (below), so a citation still always has
+        // somewhere exact to point to. There's always exactly one segment
+        // for these formats, so this numbers every chunk in the document
+        // 1..N with no gaps.
         const pageNumber = hasNativePagination ? segment.pageNumber : chunks.length + 1;
         chunks.push({ index: chunks.length, content: c.content, pageNumber });
       }
@@ -64,11 +64,11 @@ export async function processDocument(documentId: string): Promise<void> {
     let previewFileKey: string | null = null;
     if (doc.mimeType !== PDF_MIME) {
       try {
-        const renderablePages: RenderablePage[] = doc.mimeType === PPTX_MIME
-          // One page per slide, the FULL slide's text (not split by
-          // chunk) — mirrors how a real PPTX page/slide preview should
-          // read, and keeps the page numbering identical to the slide
-          // numbers every chunk from this document already carries.
+        const renderablePages: RenderablePage[] = hasNativePagination
+          // One page per slide/sheet, the FULL segment's text (not split
+          // by chunk) — mirrors how a real slide/sheet preview should
+          // read, and keeps the page numbering identical to the slide/
+          // sheet numbers every chunk from this document already carries.
           ? segments
               .filter((s): s is { pageNumber: number; text: string } => s.pageNumber !== null)
               .map((s) => ({ pageNumber: s.pageNumber, text: s.text }))

@@ -14,8 +14,26 @@ export const ACCEPTED_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'text/plain',
   'text/markdown',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/msword',
+  'application/rtf',
+  'text/html',
+  'text/csv',
+  'application/json',
+  'application/vnd.oasis.opendocument.text',
+  'application/vnd.oasis.opendocument.presentation',
+  'application/vnd.oasis.opendocument.spreadsheet',
+  'application/epub+zip',
 ]);
-export const ACCEPTED_EXTENSIONS = '.pdf,.docx,.pptx,.txt,.md';
+// Legacy binary Excel (.xls) is deliberately NOT supported — the only
+// pure-JS parser for it (SheetJS's `xlsx` package) has two unpatched high-
+// severity CVEs (prototype pollution, ReDoS) in the last version actually
+// published to npm; the fixed releases only exist on SheetJS's own CDN,
+// outside the registry. Modern .xlsx has no such gap (handled by
+// officeparser, already a dependency for other formats) — legacy .ppt has
+// the same story as .xls: no dependable pure-JS parser, so also skipped.
+export const ACCEPTED_EXTENSIONS =
+  '.pdf,.docx,.pptx,.txt,.md,.xlsx,.doc,.rtf,.html,.htm,.csv,.json,.odt,.odp,.ods,.epub';
 
 export type UploadResult = { id: string; status: string } | { error: string };
 
@@ -111,7 +129,7 @@ export function formatBytes(bytes: number): string {
 
 export function validateFile(file: File, uploadMaxMb: number): string | null {
   if (!ACCEPTED_MIME_TYPES.has(file.type)) {
-    return `Unsupported file type${file.type ? ` (${file.type})` : ''}. Use PDF, DOCX, PPTX, TXT, or MD.`;
+    return `Unsupported file type${file.type ? ` (${file.type})` : ''}. Use PDF, Word, PowerPoint, Excel, CSV, TXT, MD, RTF, HTML, JSON, EPUB, or OpenDocument (.odt/.odp/.ods).`;
   }
   const maxBytes = uploadMaxMb * 1024 * 1024;
   if (file.size > maxBytes) {
