@@ -4,6 +4,7 @@ import { listDocumentsWithUploader } from '@/lib/db/queries/documents';
 import { listRolesByRank } from '@/lib/db/queries/users';
 import { KnowledgeBase } from '@/components/documents/KnowledgeBase';
 import { config } from '@/lib/config';
+import { logAuditEvent } from '@/lib/audit/log';
 
 // Next.js requires maxDuration at the PAGE level (not the action file
 // itself) to extend the default Server Action timeout — this page's
@@ -21,7 +22,19 @@ export const maxDuration = 60;
 // stay a separate, still-admin-only surface — see app/(app)/admin.
 export default async function KnowledgeBasePage() {
   const ctx = await getAuthContext();
-  if (!ctx.canUploadDocuments) redirect('/chat');
+  // See the matching comment/fix in app/(app)/admin/layout.tsx — same gap,
+  // same fix: describeAuditEvent already had a case for this resource
+  // ("Blocked: tried to upload a document without permission") with
+  // nothing ever calling logAuditEvent to produce it.
+  if (!ctx.canUploadDocuments) {
+    await logAuditEvent({
+      action: 'ACCESS_DENIED',
+      result: 'DENIED',
+      userId: ctx.userId,
+      resource: 'documents:upload',
+    });
+    redirect('/chat');
+  }
 
   // A non-admin document manager never sees — let alone can act on — a
   // document above their own clearance; an admin still sees everything.
