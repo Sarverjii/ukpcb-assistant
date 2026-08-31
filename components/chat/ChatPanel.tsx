@@ -194,10 +194,13 @@ export function ChatPanel({
             />
           ))}
           {pending && (
-            <div className="flex items-center gap-1">
-              <Dot delay="0ms" />
-              <Dot delay="150ms" />
-              <Dot delay="300ms" />
+            <div className="flex items-center gap-2 text-sm text-zinc-400">
+              <div className="flex items-center gap-1">
+                <Dot delay="0ms" />
+                <Dot delay="150ms" />
+                <Dot delay="300ms" />
+              </div>
+              Reading your authorized documents…
             </div>
           )}
           {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}

@@ -8,6 +8,7 @@ import {
   replaceDocumentAction,
   finalizeReplaceDocumentAction,
 } from '@/app/(app)/admin/documents/actions';
+import { LocalTime } from '@/components/admin/LocalTime';
 
 type Document = {
   id: string;
@@ -30,33 +31,105 @@ export function DocumentsTable({
   roles: Role[];
   useClientUpload: boolean;
 }) {
+  const [search, setSearch] = useState('');
+  const [clearanceFilter, setClearanceFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+
+  const departments = Array.from(new Set(documents.map((d) => d.department).filter(Boolean))) as string[];
+  const [departmentFilter, setDepartmentFilter] = useState('ALL');
+
+  // Filtered client-side for the same reason as EmployeesTable: the corpus
+  // (dozens to low hundreds of documents) is already fetched for this page,
+  // and every extra DB round trip on this deployment costs real cross-
+  // region latency — see vercel.json.
+  const q = search.trim().toLowerCase();
+  const filtered = documents.filter((d) => {
+    if (clearanceFilter !== 'ALL' && String(d.clearanceLevel) !== clearanceFilter) return false;
+    if (statusFilter !== 'ALL' && d.status !== statusFilter) return false;
+    if (departmentFilter !== 'ALL' && d.department !== departmentFilter) return false;
+    if (q && !d.name.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
-      <table className="w-full text-left text-sm">
-        <thead className="bg-zinc-50 dark:bg-zinc-900 text-xs uppercase text-zinc-500">
-          <tr>
-            <th className="px-3 py-2">Document</th>
-            <th className="px-3 py-2">Uploaded by</th>
-            <th className="px-3 py-2">Clearance</th>
-            <th className="px-3 py-2">Department</th>
-            <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2">Updated</th>
-            <th className="px-3 py-2">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {documents.map((d) => (
-            <DocumentRow key={d.id} doc={d} roles={roles} useClientUpload={useClientUpload} />
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by document name…"
+          className="w-full max-w-xs rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm outline-none focus:border-brand-500"
+        />
+        <select
+          value={clearanceFilter}
+          onChange={(e) => setClearanceFilter(e.target.value)}
+          className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
+        >
+          <option value="ALL">All clearances</option>
+          {roles.map((r) => (
+            <option key={r.hierarchyRank} value={r.hierarchyRank}>
+              {r.name}
+            </option>
           ))}
-          {documents.length === 0 && (
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
+        >
+          <option value="ALL">All statuses</option>
+          <option value="PENDING">Pending</option>
+          <option value="PROCESSING">Processing</option>
+          <option value="READY">Ready</option>
+          <option value="FAILED">Failed</option>
+        </select>
+        {departments.length > 0 && (
+          <select
+            value={departmentFilter}
+            onChange={(e) => setDepartmentFilter(e.target.value)}
+            className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
+          >
+            <option value="ALL">All departments</option>
+            {departments.map((dept) => (
+              <option key={dept} value={dept}>
+                {dept}
+              </option>
+            ))}
+          </select>
+        )}
+        <span className="text-xs text-zinc-400">
+          {filtered.length} of {documents.length}
+        </span>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-zinc-50 dark:bg-zinc-900 text-xs uppercase text-zinc-500">
             <tr>
-              <td colSpan={7} className="px-3 py-4 text-center text-zinc-400">
-                No documents yet.
-              </td>
+              <th className="px-3 py-2">Document</th>
+              <th className="px-3 py-2">Uploaded by</th>
+              <th className="px-3 py-2">Clearance</th>
+              <th className="px-3 py-2">Department</th>
+              <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2">Updated</th>
+              <th className="px-3 py-2">Actions</th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {filtered.map((d) => (
+              <DocumentRow key={d.id} doc={d} roles={roles} useClientUpload={useClientUpload} />
+            ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-3 py-4 text-center text-zinc-400">
+                  {documents.length === 0 ? 'No documents yet.' : 'No documents match your search.'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -161,7 +234,7 @@ function DocumentRow({
         <StatusPill status={doc.status} />
       </td>
       <td className="px-3 py-2 whitespace-nowrap text-zinc-500">
-        {new Date(doc.updatedAt).toLocaleString()}
+        <LocalTime iso={doc.updatedAt} />
       </td>
       <td className="px-3 py-2">
         <div className="flex flex-wrap gap-2">

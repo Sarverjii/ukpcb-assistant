@@ -6,6 +6,7 @@ import {
   toggleEmployeeStatusAction,
   resetEmployeePasswordAction,
 } from '@/app/(app)/admin/employees/actions';
+import { LocalTime } from '@/components/admin/LocalTime';
 
 type User = {
   id: string;
@@ -28,26 +29,87 @@ export function EmployeesTable({
   roles: Role[];
   currentUserId: string;
 }) {
+  const [search, setSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+
+  // Client-side filtering: the whole roster (a few dozen rows at most) is
+  // already fetched for this page, and every deployed environment here pays
+  // a real cross-region round trip per DB query (see vercel.json's region
+  // pin) — adding a server round trip just to filter an already-in-memory
+  // list would make the exact lag this table is meant to help with worse,
+  // not better.
+  const q = search.trim().toLowerCase();
+  const filtered = users.filter((u) => {
+    if (roleFilter !== 'ALL' && u.roleId !== roleFilter) return false;
+    if (statusFilter !== 'ALL' && u.status !== statusFilter) return false;
+    if (q && !u.name.toLowerCase().includes(q) && !u.email.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
-      <table className="w-full text-left text-sm">
-        <thead className="bg-zinc-50 dark:bg-zinc-900 text-xs uppercase text-zinc-500">
-          <tr>
-            <th className="px-3 py-2">Name</th>
-            <th className="px-3 py-2">Email</th>
-            <th className="px-3 py-2">Department</th>
-            <th className="px-3 py-2">Role / Clearance</th>
-            <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2">Last login</th>
-            <th className="px-3 py-2">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map((u) => (
-            <EmployeeRow key={u.id} user={u} roles={roles} isSelf={u.id === currentUserId} />
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name or email…"
+          className="w-full max-w-xs rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm outline-none focus:border-brand-500"
+        />
+        <select
+          value={roleFilter}
+          onChange={(e) => setRoleFilter(e.target.value)}
+          className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
+        >
+          <option value="ALL">All roles</option>
+          {roles.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.name}
+            </option>
           ))}
-        </tbody>
-      </table>
+        </select>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
+        >
+          <option value="ALL">All statuses</option>
+          <option value="ACTIVE">Active</option>
+          <option value="DISABLED">Disabled</option>
+        </select>
+        <span className="text-xs text-zinc-400">
+          {filtered.length} of {users.length}
+        </span>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-zinc-50 dark:bg-zinc-900 text-xs uppercase text-zinc-500">
+            <tr>
+              <th className="px-3 py-2">Name</th>
+              <th className="px-3 py-2">Email</th>
+              <th className="px-3 py-2">Department</th>
+              <th className="px-3 py-2">Role / Clearance</th>
+              <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2">Last login</th>
+              <th className="px-3 py-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((u) => (
+              <EmployeeRow key={u.id} user={u} roles={roles} isSelf={u.id === currentUserId} />
+            ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-3 py-4 text-center text-zinc-400">
+                  No employees match your search.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -115,7 +177,7 @@ function EmployeeRow({ user, roles, isSelf }: { user: User; roles: Role[]; isSel
         </span>
       </td>
       <td className="px-3 py-2 whitespace-nowrap text-zinc-500">
-        {user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : 'Never'}
+        {user.lastLoginAt ? <LocalTime iso={user.lastLoginAt} /> : 'Never'}
       </td>
       <td className="px-3 py-2">
         <div className="flex flex-wrap gap-2">
