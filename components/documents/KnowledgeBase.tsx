@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { UploadForm } from '@/components/documents/UploadForm';
 import { DocumentsTable, type DocumentRow } from '@/components/documents/DocumentsTable';
+import { useUploadQueue } from '@/components/documents/UploadQueueContext';
 
 type Role = { hierarchyRank: number; name: string };
 
@@ -16,12 +17,13 @@ type Role = { hierarchyRank: number; name: string };
  * session state) no matter when you come back to look, including after
  * navigating away mid-upload and back.
  *
- * The only piece of state this owns itself is whether an upload is
- * currently running, so the document list below can refresh live while
- * one is — UploadForm already tracks its own per-file progress
- * internally; this just needs to know when to pull the server's document
- * list (router.refresh()) so a newly-created row (and its
- * PENDING → PROCESSING → READY progression) shows up here without a
+ * "Is an upload currently running" itself comes from two places: bulk
+ * batches live in the shared upload queue (UploadQueueContext, mounted at
+ * the app root so it survives navigating away and back), while a single
+ * upload's progress stays local to UploadForm and is reported up via
+ * onUploadingChange. Either one running should keep the document list
+ * below refreshing live (router.refresh()) so a newly-created row (and
+ * its PENDING → PROCESSING → READY progression) shows up here without a
  * manual reload.
  */
 export function KnowledgeBase({
@@ -36,7 +38,9 @@ export function KnowledgeBase({
   uploadMaxMb: number;
 }) {
   const router = useRouter();
-  const [uploading, setUploading] = useState(false);
+  const queue = useUploadQueue();
+  const [singleUploading, setSingleUploading] = useState(false);
+  const uploading = queue.isRunning || singleUploading;
 
   useEffect(() => {
     if (!uploading) return;
@@ -57,7 +61,7 @@ export function KnowledgeBase({
             roles={roles}
             useClientUpload={useClientUpload}
             uploadMaxMb={uploadMaxMb}
-            onUploadingChange={setUploading}
+            onUploadingChange={setSingleUploading}
           />
         </div>
       </section>

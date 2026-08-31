@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { getThemePreference } from "@/lib/theme";
+import { UploadQueueProvider } from "@/components/documents/UploadQueueContext";
 
 // Inter — the standard, neutral typeface for professional SaaS/enterprise
 // products (Linear, Notion, Stripe-adjacent tools), chosen deliberately
@@ -35,7 +36,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${inter.variable} ${geistMono.variable} h-full antialiased ${theme === "DARK" ? "dark" : ""}`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <UploadQueueProvider>{children}</UploadQueueProvider>
+      </body>
     </html>
   );
 }
