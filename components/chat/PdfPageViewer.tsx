@@ -54,6 +54,8 @@ export function PdfPageViewer({
 
     async function render() {
       setState({ status: 'loading' });
+      // eslint-disable-next-line no-console
+      console.log('[highlight-debug] render() start, page', pageNumber, 'hasHighlightText', !!highlightText);
       try {
         const pdfjs = await import('pdfjs-dist');
         pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;

@@ -2,6 +2,8 @@ import { chromium } from 'playwright';
 const BASE = 'https://ask-evon.vercel.app';
 const browser = await chromium.launch();
 const page = await browser.newPage();
+page.on('console', (msg) => console.log('[browser]', msg.type(), msg.text().slice(0, 500)));
+page.on('pageerror', (err) => console.log('[pageerror]', err.message));
 
 await page.goto(`${BASE}/login`);
 await page.fill('input[type="email"]', 'cxo@evon.com');
