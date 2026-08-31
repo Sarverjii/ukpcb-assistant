@@ -59,6 +59,31 @@ export async function retrieveAuthorizedChunks(
 }
 
 /**
+ * Backs the citation-preview feature: a user clicks a citation chip on an
+ * already-authorized answer and expects to see the actual cited text. The
+ * chunk's id alone (stored on the Message row) isn't proof of current
+ * authorization — clearance can change after a message was sent — so this
+ * re-checks `clearanceRank <= userClearanceRank` at read time, same as
+ * every other chunk access in this app, rather than trusting that a chunk
+ * id showing up in a citation once means it's still safe to show now.
+ */
+export async function getChunkForUser(
+  chunkId: string,
+  userClearanceRank: number,
+): Promise<{ id: string; content: string; documentId: string; documentName: string } | null> {
+  const rows = await prisma.$queryRaw<
+    { id: string; content: string; documentId: string; documentName: string }[]
+  >`
+    SELECT dc.id, dc.content, dc."documentId" AS "documentId", d.name AS "documentName"
+    FROM "DocumentChunk" dc
+    JOIN "Document" d ON d.id = dc."documentId"
+    WHERE dc.id = ${chunkId} AND dc."clearanceRank" <= ${userClearanceRank}
+    LIMIT 1
+  `;
+  return rows[0] ?? null;
+}
+
+/**
  * Fetches chunks belonging to a specific, already-clearance-checked set of
  * documents — used when lib/rag/documentNameMatch.ts detects the question
  * directly names a document, so its content reaches the model even if its

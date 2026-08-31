@@ -1,7 +1,28 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '@/lib/config';
-import type { LLMProvider } from '@/lib/llm/types';
+import type { GenerateAnswerParams, LLMProvider } from '@/lib/llm/types';
 import { buildUserTurn, extractCitedChunkIds } from '@/lib/llm/shared';
+
+function buildMessages(params: GenerateAnswerParams): Anthropic.MessageParam[] {
+  const userTurn = buildUserTurn(params.contextChunks, params.question, params.documentInventory);
+  return [
+    ...params.conversationHistory.map((t) => ({ role: t.role, content: t.content })),
+    { role: 'user' as const, content: userTurn },
+  ];
+}
+
+function mapAnthropicError(err: unknown): Error {
+  if (err instanceof Anthropic.AuthenticationError) {
+    return new Error('Anthropic API authentication failed — check ANTHROPIC_API_KEY.');
+  }
+  if (err instanceof Anthropic.RateLimitError) {
+    return new Error('Anthropic API rate limit hit — please retry shortly.');
+  }
+  if (err instanceof Anthropic.APIError) {
+    return new Error(`Anthropic API error (${err.status}): ${err.message}`);
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
 
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
@@ -16,26 +37,15 @@ function getClient(): Anthropic {
 }
 
 export class AnthropicLLMProvider implements LLMProvider {
-  async generateAnswer({
-    systemPrompt,
-    contextChunks,
-    conversationHistory,
-    question,
-    documentInventory,
-  }: Parameters<LLMProvider['generateAnswer']>[0]) {
-    const userTurn = buildUserTurn(contextChunks, question, documentInventory);
-
-    const messages: Anthropic.MessageParam[] = [
-      ...conversationHistory.map((t) => ({ role: t.role, content: t.content })),
-      { role: 'user', content: userTurn },
-    ];
+  async generateAnswer(params: GenerateAnswerParams) {
+    const messages = buildMessages(params);
 
     let response: Anthropic.Message;
     try {
       response = await getClient().messages.create({
         model: config.ANTHROPIC_MODEL,
         max_tokens: 1024,
-        system: systemPrompt,
+        system: params.systemPrompt,
         // Grounded, retrieval-based QA over a handful of short chunks isn't
         // hard reasoning — low effort keeps latency/cost down without a
         // meaningful quality tradeoff for this workload. Raise this if
@@ -52,16 +62,7 @@ export class AnthropicLLMProvider implements LLMProvider {
         messages,
       });
     } catch (err) {
-      if (err instanceof Anthropic.AuthenticationError) {
-        throw new Error('Anthropic API authentication failed — check ANTHROPIC_API_KEY.');
-      }
-      if (err instanceof Anthropic.RateLimitError) {
-        throw new Error('Anthropic API rate limit hit — please retry shortly.');
-      }
-      if (err instanceof Anthropic.APIError) {
-        throw new Error(`Anthropic API error (${err.status}): ${err.message}`);
-      }
-      throw err;
+      throw mapAnthropicError(err);
     }
 
     const text = response.content
@@ -69,6 +70,33 @@ export class AnthropicLLMProvider implements LLMProvider {
       .map((b) => b.text)
       .join('');
 
-    return { text, citedChunkIds: extractCitedChunkIds(text, contextChunks) };
+    return { text, citedChunkIds: extractCitedChunkIds(text, params.contextChunks) };
+  }
+
+  async *generateAnswerStream(params: GenerateAnswerParams): AsyncGenerator<string, void, void> {
+    const messages = buildMessages(params);
+
+    // .stream() kicks off the request internally and returns synchronously
+    // (it's not itself a Promise) — a connection/auth failure only ever
+    // surfaces once iteration starts, not from this call, so there's
+    // nothing to try/catch here.
+    const stream = getClient().messages.stream({
+      model: config.ANTHROPIC_MODEL,
+      max_tokens: 1024,
+      system: params.systemPrompt,
+      output_config: { effort: 'low' },
+      temperature: 0,
+      messages,
+    });
+
+    try {
+      for await (const event of stream) {
+        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+          yield event.delta.text;
+        }
+      }
+    } catch (err) {
+      throw mapAnthropicError(err);
+    }
   }
 }

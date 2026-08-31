@@ -8,6 +8,7 @@ import { listAccessibleDocumentSummaries } from '@/lib/db/queries/documents';
 import { matchDocumentsByName } from '@/lib/rag/documentNameMatch';
 import { getEmbeddingProvider } from '@/lib/embeddings';
 import { getLLMProvider } from '@/lib/llm';
+import { extractCitedChunkIds } from '@/lib/llm/shared';
 import { CHAT_SYSTEM_PROMPT } from '@/lib/llm/promptTemplates';
 import { logAuditEvent } from '@/lib/audit/log';
 import type { ChatTurn } from '@/lib/llm/types';
@@ -73,12 +74,22 @@ export type AnswerResult = { text: string; citations: Citation[] };
  *      impossible to cite a document the caller isn't cleared for. When
  *      `relevant` is empty, citations are always empty too.
  */
-export async function answerQuestion(
+type RetrievedContext = {
+  relevant: RetrievedChunk[];
+  documentInventory: { name: string; description: string | null }[];
+};
+
+/**
+ * Steps 1–2 of the flow documented above, shared by both answerQuestion()
+ * (non-streaming) and streamAnswer() (streaming) — the retrieval and
+ * authorization logic must behave identically regardless of which transport
+ * the answer is delivered over, so it lives in exactly one place.
+ */
+async function retrieveContext(
   ctx: AuthContext,
   conversationId: string,
   question: string,
-  conversationHistory: ChatTurn[],
-): Promise<AnswerResult> {
+): Promise<RetrievedContext> {
   const embedder = getEmbeddingProvider();
   const [queryEmbedding] = await embedder.embed([question], 'RETRIEVAL_QUERY');
 
@@ -127,6 +138,17 @@ export async function answerQuestion(
 
   const documentInventory = accessibleDocuments.map(({ name, description }) => ({ name, description }));
 
+  return { relevant, documentInventory };
+}
+
+export async function answerQuestion(
+  ctx: AuthContext,
+  conversationId: string,
+  question: string,
+  conversationHistory: ChatTurn[],
+): Promise<AnswerResult> {
+  const { relevant, documentInventory } = await retrieveContext(ctx, conversationId, question);
+
   const llm = getLLMProvider();
   const { text, citedChunkIds } = await llm.generateAnswer({
     systemPrompt: CHAT_SYSTEM_PROMPT,
@@ -139,6 +161,43 @@ export async function answerQuestion(
   const citations = buildCitations(relevant, citedChunkIds);
 
   return { text, citations };
+}
+
+/**
+ * Streaming counterpart of answerQuestion(): same retrieval/authorization
+ * path (retrieveContext), but yields raw text deltas as the model produces
+ * them instead of waiting for the full answer. Citation refs (e.g. "[3]")
+ * can straddle delta boundaries, so citations are only computed once
+ * streaming ends — from the fully-accumulated text — and handed back as
+ * this generator's return value (not a yielded event), which callers get by
+ * driving the iterator manually (`await gen.next()`) rather than a plain
+ * `for await` loop. See app/api/chat/stream/route.ts for that consumer.
+ */
+export async function* streamAnswer(
+  ctx: AuthContext,
+  conversationId: string,
+  question: string,
+  conversationHistory: ChatTurn[],
+): AsyncGenerator<string, AnswerResult, void> {
+  const { relevant, documentInventory } = await retrieveContext(ctx, conversationId, question);
+
+  const llm = getLLMProvider();
+  let fullText = '';
+  for await (const delta of llm.generateAnswerStream({
+    systemPrompt: CHAT_SYSTEM_PROMPT,
+    contextChunks: relevant,
+    conversationHistory,
+    question,
+    documentInventory,
+  })) {
+    fullText += delta;
+    yield delta;
+  }
+
+  const citedChunkIds = extractCitedChunkIds(fullText, relevant);
+  const citations = buildCitations(relevant, citedChunkIds);
+
+  return { text: fullText, citations };
 }
 
 /**

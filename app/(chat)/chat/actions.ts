@@ -8,12 +8,58 @@ import {
   touchConversation,
   deleteMessage,
   deleteConversation,
+  renameConversation,
 } from '@/lib/db/queries/conversations';
+import { getChunkForUser } from '@/lib/db/queries/chunks';
+import { logAuditEvent } from '@/lib/audit/log';
 import { prisma } from '@/lib/db/prisma';
 import { answerQuestion } from '@/lib/rag/chat';
 import type { ChatTurn } from '@/lib/llm/types';
 
 export type DeleteConversationResult = { error?: string };
+
+export type RenameConversationResult = { error?: string };
+
+const MAX_TITLE_LENGTH = 80;
+
+export async function renameConversationAction(
+  conversationId: string,
+  title: string,
+): Promise<RenameConversationResult> {
+  const ctx = await getAuthContext();
+  const trimmed = title.trim();
+  if (!trimmed) return { error: 'Title cannot be empty.' };
+
+  const renamed = await renameConversation(conversationId, ctx.userId, trimmed.slice(0, MAX_TITLE_LENGTH));
+  if (!renamed) return { error: 'Conversation not found.' };
+  return {};
+}
+
+export type CitationPreviewResult = { content: string; documentName: string } | { error: string };
+
+/**
+ * Backs the citation-preview popover: re-derives clearance fresh from the
+ * DB (getAuthContext) and re-checks it against the chunk's own
+ * clearanceRank (getChunkForUser) before returning any content — the same
+ * "authorize at read time, not just at answer time" rule as everywhere
+ * else, since a chunk id that was authorized when the answer was generated
+ * isn't proof it's still authorized now (a role/clearance change in
+ * between would otherwise leak through this second read path).
+ */
+export async function getCitationPreviewAction(chunkId: string): Promise<CitationPreviewResult> {
+  const ctx = await getAuthContext();
+  const chunk = await getChunkForUser(chunkId, ctx.clearanceRank);
+  if (!chunk) return { error: 'This citation is no longer available to your role.' };
+
+  await logAuditEvent({
+    action: 'CITATION_PREVIEWED',
+    result: 'SUCCESS',
+    userId: ctx.userId,
+    resource: chunk.documentId,
+  });
+
+  return { content: chunk.content, documentName: chunk.documentName };
+}
 
 /**
  * Deletes a conversation and its messages (cascade). Ownership is enforced

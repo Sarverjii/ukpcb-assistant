@@ -27,5 +27,12 @@ export default async function ConversationPage({
   // the new conversation's initialMessages instead of needing an effect to
   // sync it (React's recommended pattern for "reset state when a prop
   // identifying the entity changes").
-  return <ChatPanel key={conversation.id} conversationId={conversation.id} initialMessages={initialMessages} />;
+  return (
+    <ChatPanel
+      key={conversation.id}
+      conversationId={conversation.id}
+      initialMessages={initialMessages}
+      initialTitle={conversation.title}
+    />
+  );
 }

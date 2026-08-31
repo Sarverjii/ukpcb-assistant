@@ -33,6 +33,23 @@ export function appendMessage(
   });
 }
 
+/**
+ * Ownership-scoped rename, same "scope the query, don't fetch-then-check"
+ * principle as deleteConversation below — a conversation id belonging to
+ * another user matches zero rows instead of renaming the wrong thing.
+ */
+export async function renameConversation(
+  conversationId: string,
+  userId: string,
+  title: string,
+): Promise<boolean> {
+  const { count } = await prisma.conversation.updateMany({
+    where: { id: conversationId, userId },
+    data: { title },
+  });
+  return count > 0;
+}
+
 export function touchConversation(conversationId: string) {
   return prisma.conversation.update({
     where: { id: conversationId },

@@ -7,5 +7,5 @@ import { ChatPanel } from '@/components/chat/ChatPanel';
 // createConversationAndSendMessage in ./actions.ts), at which point
 // ChatPanel navigates to /chat/[id] itself.
 export default function ChatDraftPage() {
-  return <ChatPanel conversationId={null} initialMessages={[]} />;
+  return <ChatPanel conversationId={null} initialMessages={[]} initialTitle={null} />;
 }
