@@ -107,6 +107,12 @@ export function PdfPageViewer({
         const didHighlight = highlightText
           ? highlightMatchingSpans(textLayer.textDivs, textContent.items as PositionedTextItem[], highlightText)
           : false;
+        // TEMPORARY diagnostic — remove once the live/offline extraction
+        // discrepancy is root-caused. Logs to the browser console only.
+        if (highlightText && !didHighlight) {
+          console.log('[highlight-debug] page', pageNumber, 'items', JSON.stringify((textContent.items as PositionedTextItem[]).slice(0, 12)));
+          console.log('[highlight-debug] highlightText', JSON.stringify(highlightText.slice(0, 200)));
+        }
         onHighlightResult?.(didHighlight);
 
         setState({ status: 'ready' });
