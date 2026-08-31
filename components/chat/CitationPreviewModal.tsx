@@ -14,6 +14,7 @@ type PreviewState =
       documentId: string;
       pageNumber: number | null;
       previewable: boolean;
+      unit: 'page' | 'slide';
     };
 
 // Modal (not an anchored popover) deliberately — a chip's on-screen position
@@ -53,6 +54,7 @@ export function CitationPreviewModal({
               documentId: result.documentId,
               pageNumber: result.pageNumber,
               previewable: result.previewable,
+              unit: result.unit,
             },
       );
     });
@@ -95,7 +97,7 @@ export function CitationPreviewModal({
               <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{documentName}</p>
               {state.status === 'ready' && state.pageNumber && (
                 <p className="text-xs text-zinc-400">
-                  {state.previewable ? `Page ${state.pageNumber}` : `Slide ${state.pageNumber}`}
+                  {state.unit === 'slide' ? `Slide ${state.pageNumber}` : `Page ${state.pageNumber}`}
                 </p>
               )}
             </div>
@@ -165,7 +167,7 @@ export function CitationPreviewModal({
               <Presentation size={13} className="mt-0.5 shrink-0" />
               <span>
                 This is the exact passage the answer was drawn from, re-checked against your current
-                access. An in-browser page preview isn&apos;t available here — use{' '}
+                access. A page preview isn&apos;t available for this particular citation — use{' '}
                 <span className="font-medium">Open full document</span> to see it in context.
               </span>
             </div>

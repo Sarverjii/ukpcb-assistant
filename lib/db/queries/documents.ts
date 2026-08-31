@@ -42,6 +42,18 @@ export function setDocumentStatus(id: string, status: DocumentStatus, processing
 }
 
 /**
+ * Records (or clears) the storage key of the generated preview PDF — see
+ * previewFileKey's doc comment in prisma/schema.prisma. Called once per
+ * processing pass (lib/documents/pipeline.ts), always with the outcome of
+ * THAT pass: null for a native PDF (nothing to generate) or a document
+ * whose preview generation failed, a real key otherwise. Never left
+ * pointing at a stale file from a previous pass.
+ */
+export function setDocumentPreviewFileKey(id: string, previewFileKey: string | null) {
+  return prisma.document.update({ where: { id }, data: { previewFileKey } });
+}
+
+/**
  * `maxClearanceRank`, when given, restricts the list to documents at or
  * below that level — used for a non-admin knowledge-base manager, who
  * should never even see a document above their own clearance exists (let

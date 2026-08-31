@@ -46,9 +46,18 @@ export async function GET(_request: Request, { params }: RouteContext<'/api/docu
   }
 
   const storage = getStorageProvider();
+  // Native PDFs are already the viewable file. Anything else serves its
+  // generated preview rendition instead (see previewFileKey's schema doc
+  // comment) — falling back to the original file itself only for a
+  // document whose preview hasn't been generated (or failed to), in
+  // which case this just streams the original in its native format, same
+  // as before this feature existed; the citation modal already knows not
+  // to attempt a paginated PDF render for that case (previewable: false).
+  const usePreview = document.mimeType !== 'application/pdf' && document.previewFileKey;
+  const servedMimeType = usePreview ? 'application/pdf' : document.mimeType;
   let buffer: Buffer;
   try {
-    buffer = await storage.read(document.fileKey);
+    buffer = await storage.read(usePreview ? document.previewFileKey! : document.fileKey);
   } catch (err) {
     // See [id]/download/route.ts's matching comment — local-disk storage
     // can lose a file across a server restart; the chunk content/citation
@@ -65,7 +74,7 @@ export async function GET(_request: Request, { params }: RouteContext<'/api/docu
 
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
-      'Content-Type': document.mimeType,
+      'Content-Type': servedMimeType,
       'Content-Disposition': `inline; filename="${encodeURIComponent(document.name)}"`,
       'Content-Length': String(buffer.length),
       'Cache-Control': 'private, max-age=0, must-revalidate',

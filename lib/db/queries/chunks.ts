@@ -72,11 +72,20 @@ export type ChunkForUser = {
   content: string;
   documentId: string;
   documentName: string;
-  // 1-based PDF page / PPTX slide this chunk came from, or null (DOCX/TXT/
-  // MD, or a PDF/PPTX processed before this column existed). Lets the
-  // citation preview open the source document to the right spot.
+  // 1-based page this chunk came from — a real PDF page/PPTX slide
+  // number, or (DOCX/TXT/MD) a synthetic per-chunk page number into that
+  // document's generated preview PDF. Null only for a chunk processed
+  // before this column existed. Lets the citation preview open the
+  // source document to the right spot.
   pageNumber: number | null;
+  // The document's TRUE original format — always what downloads serve,
+  // regardless of previewFileKey.
   mimeType: string;
+  // Storage key of a generated preview PDF for a non-PDF original, or
+  // null (already a PDF, or preview generation hasn't produced one yet —
+  // see previewFileKey's schema doc comment). This is what the citation
+  // preview actually renders when the original isn't already a PDF.
+  previewFileKey: string | null;
 };
 
 export async function getChunkForUser(
@@ -85,7 +94,8 @@ export async function getChunkForUser(
 ): Promise<ChunkForUser | null> {
   const rows = await prisma.$queryRaw<ChunkForUser[]>`
     SELECT dc.id, dc.content, dc."documentId" AS "documentId", d.name AS "documentName",
-           dc."pageNumber" AS "pageNumber", d."mimeType" AS "mimeType"
+           dc."pageNumber" AS "pageNumber", d."mimeType" AS "mimeType",
+           d."previewFileKey" AS "previewFileKey"
     FROM "DocumentChunk" dc
     JOIN "Document" d ON d.id = dc."documentId"
     WHERE dc.id = ${chunkId} AND dc."clearanceRank" <= ${userClearanceRank}

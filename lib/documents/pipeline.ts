@@ -1,10 +1,14 @@
-import { getDocument, setDocumentStatus } from '@/lib/db/queries/documents';
+import { getDocument, setDocumentStatus, setDocumentPreviewFileKey } from '@/lib/db/queries/documents';
 import { insertDocumentChunks } from '@/lib/db/queries/chunks';
 import { getStorageProvider } from '@/lib/documents/storage';
 import { extractStructuredText } from '@/lib/documents/textExtraction';
 import { chunkText } from '@/lib/documents/chunking';
 import { getEmbeddingProvider } from '@/lib/embeddings';
 import { logAuditEvent } from '@/lib/audit/log';
+import { renderPagesToPdf, type RenderablePage } from '@/lib/documents/pdfRender';
+
+const PDF_MIME = 'application/pdf';
+const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
 
 /**
  * Runs synchronously in the request for MVP scale (~100 documents). Written
@@ -22,14 +26,22 @@ export async function processDocument(documentId: string): Promise<void> {
     // Each segment is one PDF page or PPTX slide (or, for DOCX/TXT/MD which
     // have no such boundary, the whole document as a single segment) — see
     // extractStructuredText's own docs. Chunking each segment independently
-    // means a chunk never straddles a page/slide boundary, and every
-    // resulting chunk inherits its segment's page/slide number, which is
-    // what lets the citation preview open the source PDF to the right page.
+    // means a chunk never straddles a page/slide boundary.
     const segments = await extractStructuredText(buffer, doc.mimeType);
+    const hasNativePagination = doc.mimeType === PDF_MIME || doc.mimeType === PPTX_MIME;
+
     const chunks: { index: number; content: string; pageNumber: number | null }[] = [];
     for (const segment of segments) {
       for (const c of chunkText(segment.text, { size: 1000, overlap: 150 })) {
-        chunks.push({ index: chunks.length, content: c.content, pageNumber: segment.pageNumber });
+        // PDF/PPTX: the chunk inherits its segment's real page/slide
+        // number. DOCX/TXT/MD have no such number in the source file at
+        // all (segment.pageNumber is null) — every chunk gets its own
+        // sequential page instead, one chunk per generated preview page
+        // (below), so a citation still always has somewhere exact to
+        // point to. There's always exactly one segment for these formats,
+        // so this numbers every chunk in the document 1..N with no gaps.
+        const pageNumber = hasNativePagination ? segment.pageNumber : chunks.length + 1;
+        chunks.push({ index: chunks.length, content: c.content, pageNumber });
       }
     }
 
@@ -43,6 +55,46 @@ export async function processDocument(documentId: string): Promise<void> {
     // clearanceLevel is copied onto every chunk here — see the
     // denormalization note in prisma/schema.prisma and lib/db/queries/chunks.ts.
     await insertDocumentChunks(documentId, chunks, vectors, doc.clearanceLevel);
+
+    // A native PDF already IS the viewable file (fileKey) — nothing to
+    // generate. Every other format gets a clean, generated PDF rendition
+    // so the citation preview can always open an actual rendered page
+    // instead of falling back to a bare text passage. See
+    // lib/documents/pdfRender.ts and previewFileKey's schema doc comment.
+    let previewFileKey: string | null = null;
+    if (doc.mimeType !== PDF_MIME) {
+      try {
+        const renderablePages: RenderablePage[] = doc.mimeType === PPTX_MIME
+          // One page per slide, the FULL slide's text (not split by
+          // chunk) — mirrors how a real PPTX page/slide preview should
+          // read, and keeps the page numbering identical to the slide
+          // numbers every chunk from this document already carries.
+          ? segments
+              .filter((s): s is { pageNumber: number; text: string } => s.pageNumber !== null)
+              .map((s) => ({ pageNumber: s.pageNumber, text: s.text }))
+          // One page per chunk — see the pageNumber assignment above,
+          // which this must match exactly for #page=N / getPage(N) to
+          // land on the right content.
+          : chunks.map((c) => ({ pageNumber: c.pageNumber!, text: c.content }));
+
+        const pdfBuffer = await renderPagesToPdf(renderablePages, doc.name);
+        previewFileKey = await storage.save(`${doc.name}-preview.pdf`, pdfBuffer);
+      } catch (err) {
+        // A failed preview render shouldn't fail the whole document —
+        // the chunks are already embedded and the document is usable in
+        // chat either way. The citation preview just falls back to the
+        // text passage for this one document, same as before this
+        // feature existed.
+        const message = err instanceof Error ? err.message : String(err);
+        await logAuditEvent({
+          action: 'DOCUMENT_PROCESSED',
+          result: 'ERROR',
+          resource: documentId,
+          metadata: { error: `Preview PDF generation failed (document still processed): ${message}` },
+        });
+      }
+    }
+    await setDocumentPreviewFileKey(documentId, previewFileKey);
 
     await setDocumentStatus(documentId, 'READY');
     await logAuditEvent({

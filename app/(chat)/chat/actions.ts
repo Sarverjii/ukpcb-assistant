@@ -40,14 +40,20 @@ export type CitationPreviewResult =
       content: string;
       documentId: string;
       documentName: string;
-      // 1-based PDF page / PPTX slide, or null when the format has none
-      // (DOCX/TXT/MD) or the chunk predates this column.
+      // 1-based real page/slide, or synthetic per-chunk page into a
+      // generated preview PDF — see ChunkForUser's doc comment. Null only
+      // for a chunk that predates page tracking entirely.
       pageNumber: number | null;
-      // Only PDFs get an inline, jump-to-page preview — browsers render
-      // PDF natively; there's no equivalent universal in-browser renderer
-      // for DOCX/PPTX without hosting infrastructure this app doesn't have
-      // (an Office-viewer service, or converting to images server-side).
+      // True whenever there's an actual PDF to render inline — the
+      // original (already a PDF) or a generated preview rendition for
+      // any other supported format. False only for a chunk that predates
+      // page tracking, or one whose preview generation failed — those
+      // still fall back to the plain text passage.
       previewable: boolean;
+      // Which word the preview UI should use for pageNumber — a PPTX's
+      // native pagination is genuinely slides; every other format (PDF,
+      // and DOCX/TXT/MD's generated preview) reads as pages.
+      unit: 'page' | 'slide';
     }
   | { error: string };
 
@@ -77,12 +83,14 @@ export async function getCitationPreviewAction(chunkId: string): Promise<Citatio
     metadata: { documentName: chunk.documentName },
   });
 
+  const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
   return {
     content: chunk.content,
     documentId: chunk.documentId,
     documentName: chunk.documentName,
     pageNumber: chunk.pageNumber,
-    previewable: chunk.mimeType === 'application/pdf',
+    previewable: chunk.mimeType === 'application/pdf' || chunk.previewFileKey != null,
+    unit: chunk.mimeType === PPTX_MIME ? 'slide' : 'page',
   };
 }
 
