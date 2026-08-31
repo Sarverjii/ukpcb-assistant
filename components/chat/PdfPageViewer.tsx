@@ -111,6 +111,8 @@ export function PdfPageViewer({
           : false;
         // TEMPORARY diagnostic — remove once the live/offline extraction
         // discrepancy is root-caused. Logs to the browser console only.
+        // eslint-disable-next-line no-console
+        console.log('[highlight-debug] didHighlight =', didHighlight, 'textDivs.length', textLayer.textDivs.length, 'items.length', (textContent.items as PositionedTextItem[]).length);
         if (highlightText && !didHighlight) {
           console.log('[highlight-debug] page', pageNumber, 'items', JSON.stringify((textContent.items as PositionedTextItem[]).slice(0, 12)));
           console.log('[highlight-debug] highlightText', JSON.stringify(highlightText.slice(0, 200)));
@@ -126,6 +128,8 @@ export function PdfPageViewer({
 
     render();
     return () => {
+      // eslint-disable-next-line no-console
+      console.log('[highlight-debug] cleanup running, page', pageNumber);
       cancelled = true;
       renderTask?.cancel();
       pdfDoc?.destroy();
