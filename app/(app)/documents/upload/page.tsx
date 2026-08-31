@@ -21,13 +21,18 @@ export default async function DocumentUploadPage() {
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
-      <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">Upload a document</h1>
+      <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">Upload documents</h1>
       <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
         Every document must be assigned a clearance level. Only employees at that level or above
-        will ever see it — including in AI answers.
+        will ever see it — including in AI answers. Select or drop multiple files to bulk-upload
+        them all to one clearance level at once.
       </p>
       <div className="mt-6">
-        <UploadForm roles={availableRoles} useClientUpload={config.STORAGE_PROVIDER === 'vercel-blob'} />
+        <UploadForm
+          roles={availableRoles}
+          useClientUpload={config.STORAGE_PROVIDER === 'vercel-blob'}
+          uploadMaxMb={config.UPLOAD_MAX_MB}
+        />
       </div>
     </main>
   );

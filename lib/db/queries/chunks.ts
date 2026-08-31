@@ -67,14 +67,25 @@ export async function retrieveAuthorizedChunks(
  * every other chunk access in this app, rather than trusting that a chunk
  * id showing up in a citation once means it's still safe to show now.
  */
+export type ChunkForUser = {
+  id: string;
+  content: string;
+  documentId: string;
+  documentName: string;
+  // 1-based PDF page / PPTX slide this chunk came from, or null (DOCX/TXT/
+  // MD, or a PDF/PPTX processed before this column existed). Lets the
+  // citation preview open the source document to the right spot.
+  pageNumber: number | null;
+  mimeType: string;
+};
+
 export async function getChunkForUser(
   chunkId: string,
   userClearanceRank: number,
-): Promise<{ id: string; content: string; documentId: string; documentName: string } | null> {
-  const rows = await prisma.$queryRaw<
-    { id: string; content: string; documentId: string; documentName: string }[]
-  >`
-    SELECT dc.id, dc.content, dc."documentId" AS "documentId", d.name AS "documentName"
+): Promise<ChunkForUser | null> {
+  const rows = await prisma.$queryRaw<ChunkForUser[]>`
+    SELECT dc.id, dc.content, dc."documentId" AS "documentId", d.name AS "documentName",
+           dc."pageNumber" AS "pageNumber", d."mimeType" AS "mimeType"
     FROM "DocumentChunk" dc
     JOIN "Document" d ON d.id = dc."documentId"
     WHERE dc.id = ${chunkId} AND dc."clearanceRank" <= ${userClearanceRank}
@@ -140,7 +151,7 @@ export async function retrieveChunksForDocuments(
  */
 export async function insertDocumentChunks(
   documentId: string,
-  chunks: { index: number; content: string }[],
+  chunks: { index: number; content: string; pageNumber?: number | null }[],
   embeddings: number[][],
   clearanceLevel: number,
 ): Promise<void> {
@@ -153,9 +164,9 @@ export async function insertDocumentChunks(
       const vec = toSql(embeddings[i]);
       return prisma.$executeRaw`
         INSERT INTO "DocumentChunk"
-          (id, "documentId", "chunkIndex", content, embedding, "clearanceRank", "createdAt")
+          (id, "documentId", "chunkIndex", content, embedding, "clearanceRank", "pageNumber", "createdAt")
         VALUES
-          (gen_random_uuid()::text, ${documentId}, ${chunk.index}, ${chunk.content}, ${vec}::vector, ${clearanceLevel}, now())
+          (gen_random_uuid()::text, ${documentId}, ${chunk.index}, ${chunk.content}, ${vec}::vector, ${clearanceLevel}, ${chunk.pageNumber ?? null}, now())
       `;
     }),
     // Prisma's default interactive-transaction timeout is 5000ms, covering

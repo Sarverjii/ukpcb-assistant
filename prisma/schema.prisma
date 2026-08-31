@@ -162,6 +162,16 @@ model DocumentChunk {
   // filters on.
   clearanceRank Int
 
+  // 1-based PDF page number or PPTX slide number this chunk's text was
+  // extracted from — null for DOCX/TXT/MD, which have no fixed pagination
+  // in the source file itself (a DOCX's page breaks are a function of the
+  // viewer/print layout, not stored data). Set once at insert time from
+  // lib/documents/textExtraction.ts's per-page/per-slide segmentation —
+  // never recomputed later, so it stays correct even if a future chunker
+  // change alters chunk boundaries within a page. Powers the citation
+  // preview's "open the source PDF to this exact page" feature.
+  pageNumber Int?
+
   createdAt DateTime @default(now())
 
   @@index([documentId])

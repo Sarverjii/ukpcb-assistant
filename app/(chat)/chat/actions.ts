@@ -35,16 +35,34 @@ export async function renameConversationAction(
   return {};
 }
 
-export type CitationPreviewResult = { content: string; documentName: string } | { error: string };
+export type CitationPreviewResult =
+  | {
+      content: string;
+      documentId: string;
+      documentName: string;
+      // 1-based PDF page / PPTX slide, or null when the format has none
+      // (DOCX/TXT/MD) or the chunk predates this column.
+      pageNumber: number | null;
+      // Only PDFs get an inline, jump-to-page preview — browsers render
+      // PDF natively; there's no equivalent universal in-browser renderer
+      // for DOCX/PPTX without hosting infrastructure this app doesn't have
+      // (an Office-viewer service, or converting to images server-side).
+      previewable: boolean;
+    }
+  | { error: string };
 
 /**
- * Backs the citation-preview popover: re-derives clearance fresh from the
- * DB (getAuthContext) and re-checks it against the chunk's own
- * clearanceRank (getChunkForUser) before returning any content — the same
- * "authorize at read time, not just at answer time" rule as everywhere
- * else, since a chunk id that was authorized when the answer was generated
- * isn't proof it's still authorized now (a role/clearance change in
- * between would otherwise leak through this second read path).
+ * Backs the citation-preview modal: re-derives clearance fresh from the DB
+ * (getAuthContext) and re-checks it against the chunk's own clearanceRank
+ * (getChunkForUser) before returning any content — the same "authorize at
+ * read time, not just at answer time" rule as everywhere else, since a
+ * chunk id that was authorized when the answer was generated isn't proof
+ * it's still authorized now (a role/clearance change in between would
+ * otherwise leak through this second read path). The actual PDF bytes for
+ * the inline preview are served separately by
+ * app/api/documents/[id]/view/route.ts, which re-does this exact same
+ * check independently — this action never hands back a URL that
+ * side-steps it.
  */
 export async function getCitationPreviewAction(chunkId: string): Promise<CitationPreviewResult> {
   const ctx = await getAuthContext();
@@ -58,7 +76,13 @@ export async function getCitationPreviewAction(chunkId: string): Promise<Citatio
     resource: chunk.documentId,
   });
 
-  return { content: chunk.content, documentName: chunk.documentName };
+  return {
+    content: chunk.content,
+    documentId: chunk.documentId,
+    documentName: chunk.documentName,
+    pageNumber: chunk.pageNumber,
+    previewable: chunk.mimeType === 'application/pdf',
+  };
 }
 
 /**
