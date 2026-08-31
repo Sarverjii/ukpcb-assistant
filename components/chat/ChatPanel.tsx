@@ -164,7 +164,7 @@ export function ChatPanel({
             }
           }}
           rows={1}
-          placeholder="Ask anything about your authorized company knowledge…"
+          placeholder="Message Evon…"
           className="max-h-[200px] flex-1 resize-none bg-transparent py-1.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400"
         />
         <button
