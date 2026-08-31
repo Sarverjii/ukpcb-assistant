@@ -102,3 +102,38 @@ body {
   margin-top: 0.25em;
   margin-bottom: 0.25em;
 }
+
+/*
+ * Minimal, hand-picked subset of pdf.js's own text-layer stylesheet
+ * (node_modules/pdfjs-dist/web/pdf_viewer.css's .textLayer rules) — just
+ * enough to position pdf.js's TextLayer output (see PdfPageViewer.tsx)
+ * correctly over its canvas render, without pulling in that package's
+ * whole viewer-app CSS bundle (annotation editors, find bar, etc. this
+ * app has no use for). Each span is invisible text (color: transparent)
+ * exactly overlaid on the canvas-rendered glyphs beneath it — selectable/
+ * searchable, but not itself what's visually shown; pdf-highlight below
+ * adds a translucent background to specific spans for the citation's
+ * cited passage, which reads as marker-highlighted printed text since the
+ * canvas glyph shows through the semi-transparent color.
+ */
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  transform-origin: 0 0;
+  z-index: 1;
+}
+.pdf-text-layer span,
+.pdf-text-layer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.pdf-text-layer .pdf-highlight {
+  background-color: rgba(255, 210, 64, 0.55);
+  border-radius: 2px;
+}

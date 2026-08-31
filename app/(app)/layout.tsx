@@ -1,8 +1,7 @@
 import { redirect } from 'next/navigation';
-import Link from 'next/link';
-import { ArrowLeft } from 'lucide-react';
 import { getAuthContext, UnauthenticatedError } from '@/lib/auth/session';
 import { ProfileMenu } from '@/components/ProfileMenu';
+import { BackToChatLink } from '@/components/BackToChatLink';
 
 // One header, two things in it: a way back to chat, and an account menu.
 // The previous version inlined every destination (Upload/Admin/Settings),
@@ -26,13 +25,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 dark:bg-zinc-950">
       <header className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-4 py-3 sm:px-6">
-        <Link
-          href="/chat"
-          className="flex items-center gap-1.5 text-sm font-medium text-zinc-500 dark:text-zinc-400 hover:text-brand-600"
-        >
-          <ArrowLeft size={16} />
-          Back to chat
-        </Link>
+        <BackToChatLink />
 
         <ProfileMenu
           user={{ name: ctx.name, email: ctx.email, roleName: ctx.roleName }}

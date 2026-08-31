@@ -62,9 +62,24 @@ export function buildUserTurn(
   );
 }
 
+/**
+ * Pulled real production answers where this silently dropped every
+ * citation: the model cited multiple refs in one bracket ("[2, 4]",
+ * "[1, 2, 4, 24]") rather than one bracket per ref ("[2][4]") — a real,
+ * observed model behavior, not a hypothetical — and the old regex
+ * (`/\[(\d+)\]/g`) requires a bracket's entire contents to be a single
+ * run of digits, so it silently matched nothing at all for those answers.
+ * The model was citing correctly; extraction just couldn't parse the
+ * format it happened to use. This accepts either style: a bracket holding
+ * one or several comma-separated numbers.
+ */
 export function extractCitedChunkIds(text: string, contextChunks: RetrievedChunk[]): string[] {
-  const citedRefs = [...text.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1]));
-  return [...new Set(citedRefs)]
-    .map((ref) => contextChunks[ref - 1]?.id)
-    .filter((id): id is string => Boolean(id));
+  const citedRefs = new Set<number>();
+  for (const bracket of text.matchAll(/\[(\d+(?:\s*,\s*\d+)*)\]/g)) {
+    for (const num of bracket[1].split(',')) {
+      const ref = Number(num.trim());
+      if (Number.isFinite(ref)) citedRefs.add(ref);
+    }
+  }
+  return [...citedRefs].map((ref) => contextChunks[ref - 1]?.id).filter((id): id is string => Boolean(id));
 }

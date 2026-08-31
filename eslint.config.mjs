@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored third-party asset (pdfjs-dist's own worker build, copied
+    // verbatim to public/ so the browser can fetch it — see
+    // components/chat/PdfPageViewer.tsx) — not code this project owns or
+    // should ever hand-edit, minified and not meaningfully lintable.
+    "public/pdf.worker.min.mjs",
   ]),
 ]);
 

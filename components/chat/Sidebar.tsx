@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { deleteConversationAction, renameConversationAction } from '@/app/(chat)/chat/actions';
 import { ProfileMenu } from '@/components/ProfileMenu';
+import { LAST_CONVERSATION_STORAGE_KEY } from '@/lib/lastConversation';
 
 type Conversation = { id: string; title: string | null; updatedAt: string };
 type User = { name: string; email: string; roleName: string };
@@ -317,6 +318,16 @@ function ConversationItem({
     }
     startTransition(async () => {
       await deleteConversationAction(conversation.id);
+      // If "Back to chat" (BackToChatLink.tsx) was pointing at this
+      // conversation, it needs to forget it — otherwise it'd send a later
+      // visit to Admin/Settings back to a 404 instead of a safe fallback.
+      try {
+        if (localStorage.getItem(LAST_CONVERSATION_STORAGE_KEY) === conversation.id) {
+          localStorage.removeItem(LAST_CONVERSATION_STORAGE_KEY);
+        }
+      } catch {
+        // Unavailable — nothing to clean up either way.
+      }
       if (active) {
         // The conversation being viewed just disappeared — /chat picks the
         // next most recent conversation (or starts a fresh one if none).

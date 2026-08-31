@@ -7,6 +7,7 @@ import { streamChat } from '@/components/chat/streamChat';
 import { Markdown } from '@/components/chat/Markdown';
 import { CitationPreviewModal } from '@/components/chat/CitationPreviewModal';
 import { downloadConversationMarkdown, exportConversationAsPdf } from '@/components/chat/exportConversation';
+import { LAST_CONVERSATION_STORAGE_KEY } from '@/lib/lastConversation';
 
 export type Citation = { documentId: string; documentName: string; chunkId: string };
 export type ChatMessage = {
@@ -43,6 +44,22 @@ export function ChatPanel({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    // Records the last real conversation viewed so "Back to chat" from
+    // Admin/Settings/Upload (BackToChatLink.tsx) can return here instead of
+    // always resetting to a blank draft. Covers every way this component
+    // ends up showing a real conversation (direct link, sidebar click,
+    // browser back/forward, a brand-new send that navigates here) since
+    // they all mount ChatPanel with a non-null conversationId.
+    if (!conversationId) return;
+    try {
+      localStorage.setItem(LAST_CONVERSATION_STORAGE_KEY, conversationId);
+    } catch {
+      // Unavailable (private browsing, blocked storage) — BackToChatLink
+      // just falls back to "/chat" in that case, no functional loss.
+    }
+  }, [conversationId]);
 
   function appendDelta(messageId: string, text: string) {
     setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, content: m.content + text } : m)));
