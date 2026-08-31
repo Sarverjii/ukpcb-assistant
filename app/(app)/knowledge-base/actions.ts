@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { after } from 'next/server';
 import { getAuthContext } from '@/lib/auth/session';
-import { requireAdmin } from '@/lib/auth/rbac';
+import { requireCanManageDocument, ForbiddenError } from '@/lib/auth/rbac';
 import { logAuditEvent } from '@/lib/audit/log';
 import {
   getDocument,
@@ -19,12 +19,30 @@ import { config } from '@/lib/config';
 
 export type ActionResult = { error?: string };
 
+const KNOWLEDGE_BASE_PATH = '/knowledge-base';
+
 export async function changeDocumentClearanceAction(
   documentId: string,
   clearanceLevel: number,
 ): Promise<ActionResult> {
-  const ctx = await requireAdminCtx();
+  const ctx = await getAuthContext();
+  const doc = await getDocument(documentId);
 
+  try {
+    await requireCanManageDocument(ctx, doc.clearanceLevel);
+  } catch (err) {
+    if (err instanceof ForbiddenError) return { error: err.message };
+    throw err;
+  }
+  // Same rule as upload time: you can't hand a document a clearance level
+  // above your own, even one you're otherwise allowed to manage — an admin
+  // is exempt (they already bypass the ceiling entirely), same as
+  // requireCanManageDocument's own admin bypass.
+  if (!ctx.isAdmin && clearanceLevel > ctx.clearanceRank) {
+    return { error: 'You cannot assign a clearance level above your own.' };
+  }
+
+  const previousClearanceLevel = doc.clearanceLevel;
   await updateDocumentClearance(documentId, clearanceLevel);
   // The "re-indexing" the spec calls for: every existing chunk's
   // denormalized clearanceRank is updated so retrieval reflects the new
@@ -36,14 +54,26 @@ export async function changeDocumentClearanceAction(
     result: 'SUCCESS',
     userId: ctx.userId,
     resource: documentId,
-    metadata: { newClearanceLevel: clearanceLevel },
+    // documentName is captured here, not just the id, so this entry stays
+    // readable in the audit log even after the document is later deleted
+    // or renamed — an id alone becomes meaningless the moment the row it
+    // pointed to is gone.
+    metadata: { documentName: doc.name, previousClearanceLevel, newClearanceLevel: clearanceLevel },
   });
-  revalidatePath('/admin/documents');
+  revalidatePath(KNOWLEDGE_BASE_PATH);
   return {};
 }
 
 export async function deleteDocumentAction(documentId: string): Promise<ActionResult> {
-  const ctx = await requireAdminCtx();
+  const ctx = await getAuthContext();
+  const doc = await getDocument(documentId);
+
+  try {
+    await requireCanManageDocument(ctx, doc.clearanceLevel);
+  } catch (err) {
+    if (err instanceof ForbiddenError) return { error: err.message };
+    throw err;
+  }
 
   await deleteDocumentRow(documentId); // chunks cascade via FK
   await logAuditEvent({
@@ -51,19 +81,35 @@ export async function deleteDocumentAction(documentId: string): Promise<ActionRe
     result: 'SUCCESS',
     userId: ctx.userId,
     resource: documentId,
+    // The document row is gone after this — its name/clearance/uploader
+    // only survive if captured here, in the log entry itself.
+    metadata: {
+      documentName: doc.name,
+      clearanceLevel: doc.clearanceLevel,
+      uploadedById: doc.uploadedById,
+    },
   });
-  revalidatePath('/admin/documents');
+  revalidatePath(KNOWLEDGE_BASE_PATH);
   return {};
 }
 
 export async function replaceDocumentAction(formData: FormData): Promise<ActionResult> {
-  const ctx = await requireAdminCtx();
+  const ctx = await getAuthContext();
 
   const documentId = String(formData.get('documentId') ?? '');
   const file = formData.get('file');
   if (!documentId || !(file instanceof File)) {
     return { error: 'Missing document or file.' };
   }
+
+  const doc = await getDocument(documentId); // 404s (throws) if it doesn't exist
+  try {
+    await requireCanManageDocument(ctx, doc.clearanceLevel);
+  } catch (err) {
+    if (err instanceof ForbiddenError) return { error: err.message };
+    throw err;
+  }
+
   if (!SUPPORTED_MIME_TYPES.includes(file.type)) {
     return { error: `Unsupported file type: ${file.type || 'unknown'}` };
   }
@@ -71,8 +117,6 @@ export async function replaceDocumentAction(formData: FormData): Promise<ActionR
   if (file.size > maxBytes) {
     return { error: `File exceeds the ${config.UPLOAD_MAX_MB}MB limit.` };
   }
-
-  await getDocument(documentId); // 404s (throws) if it doesn't exist
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const storage = getStorageProvider();
@@ -92,19 +136,20 @@ export async function replaceDocumentAction(formData: FormData): Promise<ActionR
     result: 'SUCCESS',
     userId: ctx.userId,
     resource: documentId,
+    metadata: { documentName: doc.name, newFileName: file.name },
   });
 
   // See the matching comment in app/api/documents/upload/route.ts: a bare
   // unawaited call here can get killed mid-flight on Vercel the moment this
   // action's response is sent. after() (page-level maxDuration set in
-  // app/(app)/admin/documents/page.tsx) keeps it alive until it settles.
+  // app/(app)/knowledge-base/page.tsx) keeps it alive until it settles.
   after(() =>
     processDocument(documentId).catch((err) => {
       console.error('[documents] reprocessing failed', documentId, err);
     }),
   );
 
-  revalidatePath('/admin/documents');
+  revalidatePath(KNOWLEDGE_BASE_PATH);
   return {};
 }
 
@@ -123,19 +168,26 @@ export async function finalizeReplaceDocumentAction(
   mimeType: string,
   fileSizeBytes: number,
 ): Promise<ActionResult> {
-  const ctx = await requireAdminCtx();
+  const ctx = await getAuthContext();
 
   if (!documentId || !pathname) {
     return { error: 'Missing document or file.' };
   }
+
+  const doc = await getDocument(documentId); // 404s (throws) if it doesn't exist
+  try {
+    await requireCanManageDocument(ctx, doc.clearanceLevel);
+  } catch (err) {
+    if (err instanceof ForbiddenError) return { error: err.message };
+    throw err;
+  }
+
   if (!SUPPORTED_MIME_TYPES.includes(mimeType)) {
     return { error: `Unsupported file type: ${mimeType || 'unknown'}` };
   }
   if (!Number.isFinite(fileSizeBytes) || fileSizeBytes <= 0) {
     return { error: 'Invalid file size.' };
   }
-
-  await getDocument(documentId); // 404s (throws) if it doesn't exist
 
   await deleteChunksForDocument(documentId);
   await updateDocumentFile(documentId, { fileKey: pathname, mimeType, fileSizeBytes });
@@ -145,6 +197,7 @@ export async function finalizeReplaceDocumentAction(
     result: 'SUCCESS',
     userId: ctx.userId,
     resource: documentId,
+    metadata: { documentName: doc.name },
   });
 
   after(() =>
@@ -153,12 +206,6 @@ export async function finalizeReplaceDocumentAction(
     }),
   );
 
-  revalidatePath('/admin/documents');
+  revalidatePath(KNOWLEDGE_BASE_PATH);
   return {};
-}
-
-async function requireAdminCtx() {
-  const ctx = await getAuthContext();
-  await requireAdmin(ctx);
-  return ctx;
 }

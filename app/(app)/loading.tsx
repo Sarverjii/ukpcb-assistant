@@ -2,7 +2,7 @@
 // its DB queries (getAuthContext() plus whatever the page itself fetches).
 // Without this, the browser showed nothing at all between a nav click and
 // full render — every click into /admin, /admin/employees,
-// /admin/documents, or /settings read as a stall rather than "loading."
+// /knowledge-base, or /settings read as a stall rather than "loading."
 // Doesn't reduce the actual round-trip time (see vercel.json's region pin
 // for that) — just gives instant feedback while it happens.
 export default function Loading() {

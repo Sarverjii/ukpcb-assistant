@@ -54,7 +54,11 @@ export async function moveRoleAction(roleId: string, direction: 'up' | 'down'): 
     result: 'SUCCESS',
     userId: ctx.userId,
     resource: roleId,
-    metadata: { direction, swappedWith: roles[swapIndex].id },
+    metadata: {
+      roleName: roles[index].name,
+      direction,
+      swappedWithRoleName: roles[swapIndex].name,
+    },
   });
 
   revalidatePath('/admin/hierarchy');
@@ -76,7 +80,7 @@ export async function toggleRoleCapabilityAction(
     result: 'SUCCESS',
     userId: ctx.userId,
     resource: roleId,
-    metadata: { field, newValue: !role[field] },
+    metadata: { roleName: role.name, field, newValue: !role[field] },
   });
 
   revalidatePath('/admin/hierarchy');

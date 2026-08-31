@@ -12,7 +12,7 @@ import { streamAnswer } from '@/lib/rag/chat';
 import type { ChatTurn } from '@/lib/llm/types';
 
 // Same reasoning as the other slow/model-bound routes in this app (see
-// app/(app)/admin/documents/page.tsx's matching comment) — a streamed
+// app/(app)/knowledge-base/page.tsx's matching comment) — a streamed
 // answer can still take a while to finish even though the first token now
 // arrives almost immediately.
 export const maxDuration = 60;

@@ -11,6 +11,7 @@ import {
   updateUserStatus,
   updateUserPasswordHash,
   getUserById,
+  getRoleById,
 } from '@/lib/db/queries/users';
 import { revalidatePath } from 'next/cache';
 
@@ -34,12 +35,16 @@ export async function createEmployeeAction(formData: FormData): Promise<ActionRe
 
   try {
     const user = await createUser({ name, email, passwordHash, roleId, department });
+    const role = await getRoleById(roleId);
     await logAuditEvent({
       action: 'EMPLOYEE_CREATED',
       result: 'SUCCESS',
       userId: ctx.userId,
       resource: user.id,
-      metadata: { email, roleId },
+      // Names/emails captured directly, not just ids — this entry needs to
+      // stay readable even after the employee is later renamed, moved to a
+      // different role, or removed entirely.
+      metadata: { employeeName: name, email, roleName: role.name, department },
     });
   } catch {
     return { error: 'Could not create employee — is that email already in use?' };
@@ -60,13 +65,20 @@ export async function changeEmployeeRoleAction(userId: string, roleId: string): 
     return { error: 'You cannot change your own role.' };
   }
 
+  const before = await getUserById(userId);
+  const newRole = await getRoleById(roleId);
   await updateUserRole(userId, roleId);
   await logAuditEvent({
     action: 'EMPLOYEE_ROLE_CHANGED',
     result: 'SUCCESS',
     userId: ctx.userId,
     resource: userId,
-    metadata: { newRoleId: roleId },
+    metadata: {
+      employeeName: before.name,
+      employeeEmail: before.email,
+      previousRoleName: before.role.name,
+      newRoleName: newRole.name,
+    },
   });
   revalidatePath('/admin/employees');
   return {};
@@ -88,7 +100,12 @@ export async function toggleEmployeeStatusAction(userId: string): Promise<Action
     result: 'SUCCESS',
     userId: ctx.userId,
     resource: userId,
-    metadata: { newStatus: nextStatus },
+    metadata: {
+      employeeName: user.name,
+      employeeEmail: user.email,
+      previousStatus: user.status,
+      newStatus: nextStatus,
+    },
   });
   revalidatePath('/admin/employees');
   return {};
@@ -98,15 +115,18 @@ export async function resetEmployeePasswordAction(userId: string): Promise<Actio
   const ctx = await getAuthContext();
   await requireAdmin(ctx);
 
+  const user = await getUserById(userId);
   const tempPassword = generateTempPassword();
   const passwordHash = await hashPassword(tempPassword);
   await updateUserPasswordHash(userId, passwordHash);
-  // Never log the plaintext password itself — only the fact of the reset.
+  // Never log the plaintext password itself — only the fact of the reset,
+  // and who it was for.
   await logAuditEvent({
     action: 'EMPLOYEE_PASSWORD_RESET',
     result: 'SUCCESS',
     userId: ctx.userId,
     resource: userId,
+    metadata: { employeeName: user.name, employeeEmail: user.email },
   });
   revalidatePath('/admin/employees');
   return { tempPassword };

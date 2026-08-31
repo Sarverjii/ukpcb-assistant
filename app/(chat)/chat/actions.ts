@@ -74,6 +74,7 @@ export async function getCitationPreviewAction(chunkId: string): Promise<Citatio
     result: 'SUCCESS',
     userId: ctx.userId,
     resource: chunk.documentId,
+    metadata: { documentName: chunk.documentName },
   });
 
   return {

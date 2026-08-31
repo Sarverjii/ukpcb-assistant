@@ -7,10 +7,10 @@ import {
   deleteDocumentAction,
   replaceDocumentAction,
   finalizeReplaceDocumentAction,
-} from '@/app/(app)/admin/documents/actions';
+} from '@/app/(app)/knowledge-base/actions';
 import { LocalTime } from '@/components/admin/LocalTime';
 
-type Document = {
+export type DocumentRow = {
   id: string;
   name: string;
   uploadedByName: string;
@@ -27,7 +27,7 @@ export function DocumentsTable({
   roles,
   useClientUpload,
 }: {
-  documents: Document[];
+  documents: DocumentRow[];
   roles: Role[];
   useClientUpload: boolean;
 }) {
@@ -139,7 +139,7 @@ function DocumentRow({
   roles,
   useClientUpload,
 }: {
-  doc: Document;
+  doc: DocumentRow;
   roles: Role[];
   useClientUpload: boolean;
 }) {

@@ -41,8 +41,16 @@ export function setDocumentStatus(id: string, status: DocumentStatus, processing
   });
 }
 
-export function listDocumentsWithUploader() {
+/**
+ * `maxClearanceRank`, when given, restricts the list to documents at or
+ * below that level — used for a non-admin knowledge-base manager, who
+ * should never even see a document above their own clearance exists (let
+ * alone manage it). Admins pass undefined and see everything, same as the
+ * original admin Documents table always did.
+ */
+export function listDocumentsWithUploader(maxClearanceRank?: number) {
   return prisma.document.findMany({
+    where: maxClearanceRank === undefined ? undefined : { clearanceLevel: { lte: maxClearanceRank } },
     include: { uploadedBy: { select: { name: true, email: true } } },
     orderBy: { createdAt: 'desc' },
   });

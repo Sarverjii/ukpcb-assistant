@@ -145,10 +145,17 @@ export function UploadForm({
   roles,
   useClientUpload,
   uploadMaxMb,
+  onUploadingChange,
 }: {
   roles: Role[];
   useClientUpload: boolean;
   uploadMaxMb: number;
+  // Fires true when a send starts and false once it's fully settled
+  // (single: READY/FAILED; bulk: every file settled) — lets a parent page
+  // that also shows a persistent, DB-backed document list (the knowledge
+  // base) refresh that list live while an upload is in flight, instead of
+  // only reflecting new documents on the next full page load.
+  onUploadingChange?: (uploading: boolean) => void;
 }) {
   const [files, setFiles] = useState<File[]>([]);
   const [dragActive, setDragActive] = useState(false);
@@ -231,6 +238,7 @@ export function UploadForm({
           uploadMaxMb={uploadMaxMb}
           onRemove={resetAll}
           onAddMore={() => fileInputRef.current?.click()}
+          onUploadingChange={onUploadingChange}
         />
       ) : (
         <BulkUpload
@@ -240,6 +248,7 @@ export function UploadForm({
           uploadMaxMb={uploadMaxMb}
           onRemoveFile={(f) => setFiles((prev) => prev.filter((x) => x !== f))}
           onReset={resetAll}
+          onUploadingChange={onUploadingChange}
         />
       )}
     </div>
@@ -255,6 +264,7 @@ function SingleUpload({
   uploadMaxMb,
   onRemove,
   onAddMore,
+  onUploadingChange,
 }: {
   file: File;
   roles: Role[];
@@ -262,6 +272,7 @@ function SingleUpload({
   uploadMaxMb: number;
   onRemove: () => void;
   onAddMore: () => void;
+  onUploadingChange?: (uploading: boolean) => void;
 }) {
   const validationError = validateFile(file, uploadMaxMb);
   const [name, setName] = useState(stripExtension(file.name));
@@ -277,6 +288,7 @@ function SingleUpload({
     if (validationError || !clearanceLevel) return;
     setError(null);
     setStatus('uploading');
+    onUploadingChange?.(true);
 
     const result = await submitFile(
       file,
@@ -296,6 +308,7 @@ function SingleUpload({
     if ('error' in result) {
       setError(result.error);
       setStatus('idle');
+      onUploadingChange?.(false);
       return;
     }
 
@@ -304,6 +317,7 @@ function SingleUpload({
       setStatus(s as Status);
       if (s === 'FAILED' && procError) setError(procError);
     });
+    onUploadingChange?.(false);
   }
 
   const busy = status !== 'idle' && status !== 'FAILED';
@@ -413,6 +427,7 @@ function BulkUpload({
   uploadMaxMb,
   onRemoveFile,
   onReset,
+  onUploadingChange,
 }: {
   files: File[];
   roles: Role[];
@@ -420,6 +435,7 @@ function BulkUpload({
   uploadMaxMb: number;
   onRemoveFile: (file: File) => void;
   onReset: () => void;
+  onUploadingChange?: (uploading: boolean) => void;
 }) {
   const [clearanceLevel, setClearanceLevel] = useState('');
   const [department, setDepartment] = useState('');
@@ -456,6 +472,7 @@ function BulkUpload({
   async function handleUploadAll() {
     if (!clearanceLevel || validFiles.length === 0) return;
     setRunning(true);
+    onUploadingChange?.(true);
 
     // Sequential, not parallel — this app measured real problems (RAM
     // exhaustion, embedding-API rate limits) from processing multiple
@@ -484,6 +501,7 @@ function BulkUpload({
     }
 
     setRunning(false);
+    onUploadingChange?.(false);
   }
 
   return (

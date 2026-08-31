@@ -12,6 +12,10 @@ export function listRolesByRank() {
   return prisma.role.findMany({ orderBy: { hierarchyRank: 'desc' } });
 }
 
+export function getRoleById(id: string) {
+  return prisma.role.findUniqueOrThrow({ where: { id } });
+}
+
 export type CreateUserInput = {
   name: string;
   email: string;

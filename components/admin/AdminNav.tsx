@@ -3,13 +3,17 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Users, FileText, Network, ScrollText, ChevronDown, Check } from 'lucide-react';
+import { LayoutDashboard, Users, Network, ScrollText, ChevronDown, Check } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
+// Document management lives in the Evon Knowledge Base now (see
+// app/(app)/knowledge-base) — reachable by any role granted upload
+// rights, not just admins, so it's deliberately not one of these tabs.
+// What's left here (Overview, Employees, Hierarchy, Audit Log) is the
+// genuinely admin-only surface: user/role management and the audit trail.
 const SECTIONS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: '/admin', label: 'Overview', icon: LayoutDashboard },
   { href: '/admin/employees', label: 'Employees', icon: Users },
-  { href: '/admin/documents', label: 'Documents', icon: FileText },
   { href: '/admin/hierarchy', label: 'Hierarchy', icon: Network },
   { href: '/admin/audit-logs', label: 'Audit Log', icon: ScrollText },
 ];
