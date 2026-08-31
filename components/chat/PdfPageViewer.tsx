@@ -54,8 +54,6 @@ export function PdfPageViewer({
 
     async function render() {
       setState({ status: 'loading' });
-      // eslint-disable-next-line no-console
-      console.log('[highlight-debug] render() start, page', pageNumber, 'hasHighlightText', !!highlightText);
       try {
         const pdfjs = await import('pdfjs-dist');
         pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
@@ -109,14 +107,6 @@ export function PdfPageViewer({
         const didHighlight = highlightText
           ? highlightMatchingSpans(textLayer.textDivs, textContent.items as PositionedTextItem[], highlightText)
           : false;
-        // TEMPORARY diagnostic — remove once the live/offline extraction
-        // discrepancy is root-caused. Logs to the browser console only.
-        // eslint-disable-next-line no-console
-        console.log('[highlight-debug] didHighlight =', didHighlight, 'textDivs.length', textLayer.textDivs.length, 'items.length', (textContent.items as PositionedTextItem[]).length);
-        if (highlightText && !didHighlight) {
-          console.log('[highlight-debug] page', pageNumber, 'items', JSON.stringify((textContent.items as PositionedTextItem[]).slice(0, 12)));
-          console.log('[highlight-debug] highlightText', JSON.stringify(highlightText.slice(0, 200)));
-        }
         onHighlightResult?.(didHighlight);
 
         setState({ status: 'ready' });
@@ -128,8 +118,6 @@ export function PdfPageViewer({
 
     render();
     return () => {
-      // eslint-disable-next-line no-console
-      console.log('[highlight-debug] cleanup running, page', pageNumber);
       cancelled = true;
       renderTask?.cancel();
       pdfDoc?.destroy();

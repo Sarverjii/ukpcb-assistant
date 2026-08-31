@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Menu } from 'lucide-react';
 import { Sidebar } from '@/components/chat/Sidebar';
+import { CitationPreviewProvider } from '@/components/chat/CitationPreviewContext';
 
 type Conversation = { id: string; title: string | null; updatedAt: string };
 type User = { name: string; email: string; roleName: string };
@@ -57,7 +58,9 @@ export function ChatShell({
           <span className="text-sm font-semibold text-zinc-900 dark:text-white">Ask Evon</span>
         </div>
 
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</main>
+        <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <CitationPreviewProvider>{children}</CitationPreviewProvider>
+        </main>
       </div>
     </div>
   );

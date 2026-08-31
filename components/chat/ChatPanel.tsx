@@ -5,11 +5,11 @@ import { useRouter } from 'next/navigation';
 import { ArrowUp, Copy, Check, RotateCw, Download, ChevronDown, FileText, FileDown } from 'lucide-react';
 import { streamChat } from '@/components/chat/streamChat';
 import { Markdown } from '@/components/chat/Markdown';
-import { CitationPreviewModal } from '@/components/chat/CitationPreviewModal';
+import { useCitationPreview, type Citation } from '@/components/chat/CitationPreviewContext';
 import { downloadConversationMarkdown, exportConversationAsPdf } from '@/components/chat/exportConversation';
 import { LAST_CONVERSATION_STORAGE_KEY } from '@/lib/lastConversation';
 
-export type Citation = { documentId: string; documentName: string; chunkId: string };
+export type { Citation };
 export type ChatMessage = {
   id: string;
   role: 'USER' | 'ASSISTANT';
@@ -36,7 +36,7 @@ export function ChatPanel({
   // answer is actually final. Distinct from `pending`, which also covers
   // the moment between clicking send and the first token arriving.
   const [streamingId, setStreamingId] = useState<string | null>(null);
-  const [previewCitation, setPreviewCitation] = useState<Citation | null>(null);
+  const { openCitation } = useCitationPreview();
   const router = useRouter();
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -238,7 +238,7 @@ export function ChatPanel({
                   ? () => handleRegenerate(m.id)
                   : undefined
               }
-              onCitationClick={setPreviewCitation}
+              onCitationClick={openCitation}
             />
           ))}
           {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
@@ -247,14 +247,6 @@ export function ChatPanel({
       </div>
 
       <div className="px-4 pb-6">{inputBar}</div>
-
-      {previewCitation && (
-        <CitationPreviewModal
-          chunkId={previewCitation.chunkId}
-          documentName={previewCitation.documentName}
-          onClose={() => setPreviewCitation(null)}
-        />
-      )}
     </div>
   );
 }
