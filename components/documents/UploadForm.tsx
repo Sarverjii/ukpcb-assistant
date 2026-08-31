@@ -545,6 +545,7 @@ function BulkUpload({
           </p>
           <Field label="Clearance level for all files" required>
             <select
+              name="clearanceLevel"
               value={clearanceLevel}
               onChange={(e) => setClearanceLevel(e.target.value)}
               disabled={running}
@@ -562,7 +563,7 @@ function BulkUpload({
             </select>
           </Field>
           <Field label="Department (optional, applies to all)">
-            <input value={department} onChange={(e) => setDepartment(e.target.value)} disabled={running} className={inputClass} />
+            <input name="department" value={department} onChange={(e) => setDepartment(e.target.value)} disabled={running} className={inputClass} />
           </Field>
 
           <button
