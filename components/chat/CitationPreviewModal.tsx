@@ -30,6 +30,10 @@ export function CitationPreviewModal({
   onClose: () => void;
 }) {
   const [state, setState] = useState<PreviewState>({ status: 'loading' });
+  // Best-effort text matching (PdfPageViewer) doesn't always find the
+  // cited passage on the rendered page — the caption at the bottom
+  // shouldn't claim something was highlighted when it wasn't.
+  const [highlightFound, setHighlightFound] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,11 +136,22 @@ export function CitationPreviewModal({
         {canRenderPage && state.status === 'ready' && viewUrl && (
           <>
             <div className="overflow-y-auto">
-              <PdfPageViewer url={viewUrl} pageNumber={state.pageNumber!} highlightText={state.content} />
+              <PdfPageViewer
+                url={viewUrl}
+                pageNumber={state.pageNumber!}
+                highlightText={state.content}
+                onHighlightResult={setHighlightFound}
+              />
             </div>
             <div className="flex items-center gap-2 border-t border-zinc-100 dark:border-zinc-800 px-5 py-2.5 text-xs text-zinc-400">
-              <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-amber-300/70" />
-              Highlighted text is what this answer actually cited.
+              {highlightFound ? (
+                <>
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-amber-300/70" />
+                  Highlighted text is what this answer actually cited.
+                </>
+              ) : (
+                <span>This is the page the answer was drawn from.</span>
+              )}
             </div>
           </>
         )}

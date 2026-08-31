@@ -24,10 +24,16 @@ export function PdfPageViewer({
   url,
   pageNumber,
   highlightText,
+  onHighlightResult,
 }: {
   url: string;
   pageNumber: number;
   highlightText?: string;
+  // Fires once per render with whether the cited passage was actually
+  // found and highlighted on the page — best-effort matching (see
+  // highlightMatchingSpans) doesn't always succeed, and the caller
+  // shouldn't claim "highlighted text" happened when it didn't.
+  onHighlightResult?: (found: boolean) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
@@ -37,6 +43,14 @@ export function PdfPageViewer({
   useEffect(() => {
     let cancelled = false;
     let renderTask: { cancel: () => void } | null = null;
+    // pdf.js documents hold real memory (the decoded PDF, cached fonts,
+    // etc.) that isn't freed just because the component unmounts —
+    // .destroy() is how you tell it to actually release that. Without
+    // this, opening several different citations in one session (a modal
+    // instance per open, since ChatPanel mounts/unmounts this
+    // conditionally) would accumulate one un-freed document per citation
+    // previewed.
+    let pdfDoc: { destroy: () => Promise<void> } | null = null;
 
     async function render() {
       setState({ status: 'loading' });
@@ -45,6 +59,7 @@ export function PdfPageViewer({
         pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
 
         const doc = await pdfjs.getDocument({ url, withCredentials: true }).promise;
+        pdfDoc = doc;
         if (cancelled) return;
         const page = await doc.getPage(pageNumber);
         if (cancelled) return;
@@ -89,9 +104,10 @@ export function PdfPageViewer({
         await textLayer.render();
         if (cancelled) return;
 
-        if (highlightText) {
-          highlightMatchingSpans(textLayer.textDivs, textLayer.textContentItemsStr, highlightText);
-        }
+        const didHighlight = highlightText
+          ? highlightMatchingSpans(textLayer.textDivs, textLayer.textContentItemsStr, highlightText)
+          : false;
+        onHighlightResult?.(didHighlight);
 
         setState({ status: 'ready' });
       } catch (err) {
@@ -104,8 +120,9 @@ export function PdfPageViewer({
     return () => {
       cancelled = true;
       renderTask?.cancel();
+      pdfDoc?.destroy();
     };
-  }, [url, pageNumber, highlightText]);
+  }, [url, pageNumber, highlightText, onHighlightResult]);
 
   return (
     <div className="flex justify-center bg-zinc-200 dark:bg-zinc-950 px-4 py-6">
@@ -163,7 +180,7 @@ export function PdfPageViewer({
  * normalizing the most common offenders (bullets, curly quotes/dashes)
  * below fixes the common cases outright.
  */
-function highlightMatchingSpans(textDivs: HTMLElement[], itemStrings: string[], highlightText: string): void {
+function highlightMatchingSpans(textDivs: HTMLElement[], itemStrings: string[], highlightText: string): boolean {
   const normalize = (s: string) =>
     s
       .replace(/[●•◦‣▪]/g, ' ')
@@ -191,10 +208,18 @@ function highlightMatchingSpans(textDivs: HTMLElement[], itemStrings: string[], 
   });
 
   const words = normalize(highlightText).trim().split(' ').filter(Boolean);
+  if (words.length === 0) return false;
+
   let matchStart = -1;
   let matchLength = 0;
-  for (const wordCount of [20, 14, 10, 6]) {
-    if (words.length < wordCount) continue;
+  // Word-count windows capped to how many words are actually available —
+  // a highlightText shorter than 6 words (a short chunk, or a short
+  // trailing fragment) would otherwise never get a single attempt, since
+  // every fixed window would exceed its length.
+  const windows = [...new Set([20, 14, 10, 6, words.length].filter((n) => n <= words.length))].sort(
+    (a, b) => b - a,
+  );
+  for (const wordCount of windows) {
     const needle = words.slice(0, wordCount).join(' ');
     matchStart = haystack.indexOf(needle);
     if (matchStart !== -1) {
@@ -202,7 +227,7 @@ function highlightMatchingSpans(textDivs: HTMLElement[], itemStrings: string[], 
       break;
     }
   }
-  if (matchStart === -1) return;
+  if (matchStart === -1) return false;
 
   const matchedItemIndexes = new Set<number>();
   for (let i = matchStart; i < matchStart + matchLength && i < offsetToItem.length; i++) {
@@ -211,4 +236,5 @@ function highlightMatchingSpans(textDivs: HTMLElement[], itemStrings: string[], 
   for (const itemIndex of matchedItemIndexes) {
     textDivs[itemIndex]?.classList.add('pdf-highlight');
   }
+  return true;
 }
