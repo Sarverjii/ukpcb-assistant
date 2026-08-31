@@ -64,6 +64,22 @@ body {
  * `components` prop; this just fixes the vertical rhythm between block
  * elements that markdown output otherwise renders with no spacing at all.
  */
+.prose-chat {
+  /* A long unbroken token (a long URL with no hyphens/spaces, a run-on
+     filename) would otherwise overflow the message column horizontally
+     instead of wrapping — narrow enough phone widths hit this in practice
+     where desktop's wider column never did. */
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.prose-chat pre,
+.prose-chat code {
+  /* Code needs its own horizontal scroll (Markdown.tsx's overflow-x-auto
+     on <pre>), not forced mid-token breaking — that would mangle long
+     identifiers/URLs in code samples instead of just scrolling past them. */
+  overflow-wrap: normal;
+  word-break: normal;
+}
 .prose-chat > :first-child {
   margin-top: 0;
 }

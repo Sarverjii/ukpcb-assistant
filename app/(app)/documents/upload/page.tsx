@@ -20,7 +20,7 @@ export default async function DocumentUploadPage() {
   const availableRoles = roles.filter((r) => r.hierarchyRank <= ctx.clearanceRank);
 
   return (
-    <main className="mx-auto max-w-2xl px-6 py-10">
+    <main className="mx-auto max-w-2xl px-4 py-10 sm:px-6">
       <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">Upload a document</h1>
       <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
         Every document must be assigned a clearance level. Only employees at that level or above

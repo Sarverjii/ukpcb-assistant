@@ -30,18 +30,28 @@ export function Sidebar({
   isAdmin,
   initialTheme,
   conversations,
+  mobileOpen,
+  onCloseMobile,
 }: {
   user: User;
   canUploadDocuments: boolean;
   isAdmin: boolean;
   initialTheme: 'LIGHT' | 'DARK';
   conversations: Conversation[];
+  // Below md, the sidebar is an off-canvas drawer (owned by ChatShell,
+  // which also renders the hamburger button that opens it — there's no
+  // room to dock a permanent rail on a phone-width screen) rather than the
+  // permanent collapsible column it is at md+.
+  mobileOpen: boolean;
+  onCloseMobile: () => void;
 }) {
-  // Deliberately not persisted (e.g. to localStorage): reading a client-only
-  // store during the initial render to decide collapsed/expanded would
-  // either require an effect-based sync after mount (a one-frame layout
-  // flash) or risk a server/client hydration mismatch on first paint.
-  // Defaulting open every load is simpler and avoids both.
+  // Desktop-only: collapsed/expanded rail toggle. Deliberately not
+  // persisted (e.g. to localStorage) — reading a client-only store during
+  // the initial render to decide collapsed/expanded would either require
+  // an effect-based sync after mount (a one-frame layout flash) or risk a
+  // server/client hydration mismatch on first paint. Defaulting open every
+  // load is simpler and avoids both. Irrelevant on mobile, where the
+  // drawer is always shown "full" (or not at all) — see mobileOpen above.
   const [collapsed, setCollapsed] = useState(false);
   const [search, setSearch] = useState('');
   const pathname = usePathname();
@@ -60,32 +70,131 @@ export function Sidebar({
     ? conversations.filter((c) => (c.title || 'New conversation').toLowerCase().includes(q))
     : conversations;
 
-  if (collapsed) {
-    return (
-      <div className="flex w-14 shrink-0 flex-col items-center gap-3 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 py-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo-mark.svg" alt="Evon" className="h-5 w-auto" />
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          className="rounded-md p-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white"
-          aria-label="Expand sidebar"
-        >
-          <PanelLeftOpen size={18} />
-        </button>
-        <Link
-          href="/chat"
-          className="rounded-md p-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white"
-          aria-label="New chat"
-        >
-          <SquarePen size={18} />
-        </Link>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex w-64 shrink-0 flex-col border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950">
+    <>
+      {/* Desktop: permanent column, collapsible via the button in its own
+          header. Hidden below md — the mobile drawer below replaces it
+          entirely rather than sharing markup, since the collapsed rail
+          (icon-only) has no equivalent that makes sense as an overlay. */}
+      <div className="hidden shrink-0 md:flex">
+        {collapsed ? (
+          <RailContent onExpand={toggleCollapsed} />
+        ) : (
+          <SidebarContent
+            width="w-64"
+            user={user}
+            canUploadDocuments={canUploadDocuments}
+            isAdmin={isAdmin}
+            initialTheme={initialTheme}
+            filteredConversations={filteredConversations}
+            totalConversationCount={conversations.length}
+            search={search}
+            onSearchChange={setSearch}
+            pathname={pathname}
+            headerAction={{ icon: <PanelLeftClose size={17} />, label: 'Collapse sidebar', onClick: toggleCollapsed }}
+          />
+        )}
+      </div>
+
+      {/* Mobile: off-canvas drawer, always the full (never collapsed)
+          content — translated fully off-screen when closed rather than
+          unmounted, so the open/close is a smooth slide instead of a
+          content pop-in. */}
+      <div
+        className={`fixed inset-y-0 left-0 z-40 flex w-72 shrink-0 transition-transform duration-200 ease-out md:hidden ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <SidebarContent
+          width="w-full"
+          user={user}
+          canUploadDocuments={canUploadDocuments}
+          isAdmin={isAdmin}
+          initialTheme={initialTheme}
+          filteredConversations={filteredConversations}
+          totalConversationCount={conversations.length}
+          search={search}
+          onSearchChange={setSearch}
+          pathname={pathname}
+          headerAction={{ icon: <X size={17} />, label: 'Close sidebar', onClick: onCloseMobile }}
+          onNavigate={onCloseMobile}
+        />
+      </div>
+      {mobileOpen && (
+        <div
+          aria-hidden
+          onClick={onCloseMobile}
+          className="fixed inset-0 z-30 bg-black/40 md:hidden"
+        />
+      )}
+    </>
+  );
+}
+
+function RailContent({ onExpand }: { onExpand: () => void }) {
+  return (
+    <div className="flex w-14 flex-col items-center gap-3 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 py-3">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/logo-mark.svg" alt="Evon" className="h-5 w-auto" />
+      <button
+        type="button"
+        onClick={onExpand}
+        className="rounded-md p-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white"
+        aria-label="Expand sidebar"
+      >
+        <PanelLeftOpen size={18} />
+      </button>
+      <Link
+        href="/chat"
+        className="rounded-md p-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white"
+        aria-label="New chat"
+      >
+        <SquarePen size={18} />
+      </Link>
+    </div>
+  );
+}
+
+/**
+ * The actual sidebar UI (header, new chat, search, conversation list,
+ * profile menu) — shared verbatim between the desktop column and the
+ * mobile drawer so the two can never silently drift apart. `headerAction`
+ * lets each caller supply the right icon/behavior for its own header
+ * button (collapse vs close); `onNavigate` lets the mobile drawer close
+ * itself whenever a link inside is actually followed (new chat, opening a
+ * conversation) — undefined on desktop, where there's no drawer to close.
+ */
+function SidebarContent({
+  width,
+  user,
+  canUploadDocuments,
+  isAdmin,
+  initialTheme,
+  filteredConversations,
+  totalConversationCount,
+  search,
+  onSearchChange,
+  pathname,
+  headerAction,
+  onNavigate,
+}: {
+  width: string;
+  user: User;
+  canUploadDocuments: boolean;
+  isAdmin: boolean;
+  initialTheme: 'LIGHT' | 'DARK';
+  filteredConversations: Conversation[];
+  totalConversationCount: number;
+  search: string;
+  onSearchChange: (value: string) => void;
+  pathname: string;
+  headerAction: { icon: React.ReactNode; label: string; onClick: () => void };
+  onNavigate?: () => void;
+}) {
+  return (
+    <div
+      className={`flex ${width} flex-col border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950`}
+    >
       <div className="flex items-center justify-between px-3 py-3">
         <span className="flex items-center gap-2 px-1">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -94,17 +203,18 @@ export function Sidebar({
         </span>
         <button
           type="button"
-          onClick={toggleCollapsed}
+          onClick={headerAction.onClick}
           className="rounded-md p-1.5 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white"
-          aria-label="Collapse sidebar"
+          aria-label={headerAction.label}
         >
-          <PanelLeftClose size={17} />
+          {headerAction.icon}
         </button>
       </div>
 
       <div className="px-3">
         <Link
           href="/chat"
+          onClick={onNavigate}
           className="flex w-full items-center gap-2 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800"
         >
           <SquarePen size={16} />
@@ -112,21 +222,21 @@ export function Sidebar({
         </Link>
       </div>
 
-      {conversations.length > 5 && (
+      {totalConversationCount > 5 && (
         <div className="px-3 pt-3">
           <div className="relative">
             <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
             <input
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => onSearchChange(e.target.value)}
               placeholder="Search conversations…"
               className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1.5 pl-7 pr-6 text-xs text-zinc-700 dark:text-zinc-200 outline-none placeholder:text-zinc-400 focus:border-brand-400"
             />
             {search && (
               <button
                 type="button"
-                onClick={() => setSearch('')}
+                onClick={() => onSearchChange('')}
                 aria-label="Clear search"
                 className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
               >
@@ -143,12 +253,17 @@ export function Sidebar({
         </p>
         <ul className="flex flex-col gap-0.5">
           {filteredConversations.map((c) => (
-            <ConversationItem key={c.id} conversation={c} active={pathname === `/chat/${c.id}`} />
+            <ConversationItem
+              key={c.id}
+              conversation={c}
+              active={pathname === `/chat/${c.id}`}
+              onNavigate={onNavigate}
+            />
           ))}
-          {conversations.length === 0 && (
+          {totalConversationCount === 0 && (
             <li className="px-2.5 py-2 text-sm text-zinc-400 dark:text-zinc-500">No conversations yet.</li>
           )}
-          {conversations.length > 0 && filteredConversations.length === 0 && (
+          {totalConversationCount > 0 && filteredConversations.length === 0 && (
             <li className="px-2.5 py-2 text-sm text-zinc-400 dark:text-zinc-500">No matches.</li>
           )}
         </ul>
@@ -159,6 +274,7 @@ export function Sidebar({
         canUploadDocuments={canUploadDocuments}
         isAdmin={isAdmin}
         initialTheme={initialTheme}
+        onNavigate={onNavigate}
       />
     </div>
   );
@@ -167,9 +283,11 @@ export function Sidebar({
 function ConversationItem({
   conversation,
   active,
+  onNavigate,
 }: {
   conversation: Conversation;
   active: boolean;
+  onNavigate?: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -257,6 +375,7 @@ function ConversationItem({
     <li className="group/item relative">
       <Link
         href={`/chat/${conversation.id}`}
+        onClick={onNavigate}
         className={`flex items-center gap-2 truncate rounded-lg border-l-2 py-2 pl-2.5 pr-14 text-sm ${
           active
             ? 'border-brand-500 dark:border-brand-400 bg-zinc-200/70 dark:bg-zinc-800 text-zinc-900 dark:text-white'
@@ -304,11 +423,13 @@ function ProfileMenu({
   canUploadDocuments,
   isAdmin,
   initialTheme,
+  onNavigate,
 }: {
   user: User;
   canUploadDocuments: boolean;
   isAdmin: boolean;
   initialTheme: 'LIGHT' | 'DARK';
+  onNavigate?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -342,6 +463,7 @@ function ProfileMenu({
           {isAdmin && (
             <Link
               href="/admin"
+              onClick={onNavigate}
               className="flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
               <ShieldCheck size={15} /> Admin dashboard
@@ -350,6 +472,7 @@ function ProfileMenu({
           {canUploadDocuments && (
             <Link
               href="/documents/upload"
+              onClick={onNavigate}
               className="flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
               <Upload size={15} /> Upload documents
@@ -357,6 +480,7 @@ function ProfileMenu({
           )}
           <Link
             href="/settings"
+            onClick={onNavigate}
             className="flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
             <Settings size={15} /> Settings

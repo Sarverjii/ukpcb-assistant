@@ -39,7 +39,7 @@ export function AddEmployeeForm({ roles }: { roles: Role[] }) {
       </button>
 
       {open && (
-        <form ref={formRef} onSubmit={handleSubmit} className="mt-4 grid grid-cols-2 gap-3">
+        <form ref={formRef} onSubmit={handleSubmit} className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <input
             name="name"
             placeholder="Full name"
@@ -74,7 +74,7 @@ export function AddEmployeeForm({ roles }: { roles: Role[] }) {
             className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm"
           />
 
-          <div className="col-span-2 flex items-center gap-3">
+          <div className="col-span-1 flex items-center gap-3 sm:col-span-2">
             <button
               type="submit"
               disabled={pending}
@@ -86,7 +86,7 @@ export function AddEmployeeForm({ roles }: { roles: Role[] }) {
           </div>
 
           {tempPassword && (
-            <p className="col-span-2 rounded-md bg-emerald-50 dark:bg-emerald-950 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-300">
+            <p className="col-span-1 rounded-md bg-emerald-50 dark:bg-emerald-950 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-300 sm:col-span-2 break-words">
               Employee created. Temporary password (share this with them out of band — it won&apos;t be
               shown again): <code className="font-mono">{tempPassword}</code>
             </p>

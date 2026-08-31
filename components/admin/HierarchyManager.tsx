@@ -48,11 +48,11 @@ export function HierarchyManager({ roles }: { roles: Role[] }) {
         {roles.map((role, i) => (
           <div
             key={role.id}
-            className={`flex items-center gap-4 px-4 py-3 ${
+            className={`flex items-center gap-2 px-3 py-3 sm:gap-4 sm:px-4 ${
               i !== 0 ? 'border-t border-zinc-100 dark:border-zinc-800' : ''
             } bg-white dark:bg-zinc-900`}
           >
-            <div className="flex flex-col">
+            <div className="flex shrink-0 flex-col">
               <button
                 type="button"
                 disabled={i === 0 || pendingId === role.id}
@@ -77,7 +77,7 @@ export function HierarchyManager({ roles }: { roles: Role[] }) {
               {role.hierarchyRank}
             </span>
 
-            <span className="flex-1 text-sm font-medium text-zinc-900 dark:text-white">
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-zinc-900 dark:text-white">
               {role.name}
             </span>
 
@@ -85,28 +85,28 @@ export function HierarchyManager({ roles }: { roles: Role[] }) {
               type="button"
               onClick={() => toggle(role.id, 'canUploadDocuments')}
               disabled={pendingId === role.id}
-              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-medium transition-colors sm:px-2.5 ${
                 role.canUploadDocuments
                   ? 'border-brand-200 bg-brand-50 text-brand-700 dark:border-brand-900 dark:bg-brand-950 dark:text-brand-300'
                   : 'border-zinc-200 text-zinc-400 dark:border-zinc-700'
               }`}
               title="Can upload documents"
             >
-              <Upload size={12} /> Upload
+              <Upload size={12} /> <span className="hidden sm:inline">Upload</span>
             </button>
 
             <button
               type="button"
               onClick={() => toggle(role.id, 'isAdmin')}
               disabled={pendingId === role.id}
-              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-xs font-medium transition-colors sm:px-2.5 ${
                 role.isAdmin
                   ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300'
                   : 'border-zinc-200 text-zinc-400 dark:border-zinc-700'
               }`}
               title="Admin dashboard access"
             >
-              <ShieldCheck size={12} /> Admin
+              <ShieldCheck size={12} /> <span className="hidden sm:inline">Admin</span>
             </button>
           </div>
         ))}

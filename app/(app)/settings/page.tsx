@@ -15,7 +15,7 @@ export default async function SettingsPage() {
   });
 
   return (
-    <div className="mx-auto max-w-2xl px-6 py-8">
+    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
       <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">Settings</h1>
 
       <section className="mt-8">
@@ -23,7 +23,7 @@ export default async function SettingsPage() {
         <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
           Managed by your organization&apos;s admin — contact them to change your name, role, or department.
         </p>
-        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 rounded-lg border border-zinc-200 dark:border-zinc-800 p-4 text-sm sm:grid-cols-2">
+        <dl className="mt-4 grid grid-cols-1 gap-x-4 gap-y-3 rounded-lg border border-zinc-200 dark:border-zinc-800 p-4 text-sm sm:grid-cols-2">
           <Field label="Name" value={ctx.name} />
           <Field label="Email" value={ctx.email} />
           <Field label="Role" value={ctx.roleName} />
