@@ -105,7 +105,7 @@ export function PdfPageViewer({
         if (cancelled) return;
 
         const didHighlight = highlightText
-          ? highlightMatchingSpans(textLayer.textDivs, textLayer.textContentItemsStr, highlightText)
+          ? highlightMatchingSpans(textLayer.textDivs, textContent.items as PositionedTextItem[], highlightText)
           : false;
         onHighlightResult?.(didHighlight);
 
@@ -155,6 +155,11 @@ export function PdfPageViewer({
   );
 }
 
+// The subset of pdf.js's TextItem this needs — real position/size data,
+// not just the string, which is what makes gap-aware joining possible
+// below (see highlightMatchingSpans's doc comment).
+type PositionedTextItem = { str: string; transform: number[]; width: number };
+
 /**
  * Finds which of pdf.js's per-run text elements correspond to the cited
  * passage and marks them for a CSS highlight. Matches on a normalized
@@ -179,8 +184,21 @@ export function PdfPageViewer({
  * around a single bad character without needing to know where it is;
  * normalizing the most common offenders (bullets, curly quotes/dashes)
  * below fixes the common cases outright.
+ *
+ * The join between items is position-aware, not a blanket space —
+ * measured directly against a real production failure, not assumed: pdf.js
+ * routinely splits a single word into multiple adjacent items around a
+ * hyphen or kerning adjustment (e.g. "A-5" arrives as three items, "A",
+ * "-", "5", touching with ~zero gap between them), and unconditionally
+ * inserting a space between every item turned that into "A - 5" — which
+ * then never matches the stored chunk's "A-5", failing the highlight for
+ * every chunk whose needle crossed one of these splits. Measuring the
+ * actual horizontal gap between consecutive items on the same line (via
+ * their transform/width) and only inserting a space when that gap is
+ * large enough to be a real word boundary fixes it at the source, instead
+ * of trying to special-case every punctuation mark that can trigger it.
  */
-function highlightMatchingSpans(textDivs: HTMLElement[], itemStrings: string[], highlightText: string): boolean {
+function highlightMatchingSpans(textDivs: HTMLElement[], items: PositionedTextItem[], highlightText: string): boolean {
   const normalize = (s: string) =>
     s
       .replace(/[●•◦‣▪]/g, ' ')
@@ -195,16 +213,44 @@ function highlightMatchingSpans(textDivs: HTMLElement[], itemStrings: string[], 
   // concatenated string can be traced back to specific <span> elements.
   let haystack = '';
   const offsetToItem: number[] = [];
-  itemStrings.forEach((str, itemIndex) => {
-    const piece = normalize(str);
+  let prevEndX: number | null = null;
+  let prevY: number | null = null;
+  items.forEach((item, itemIndex) => {
+    const piece = normalize(item.str);
+    const x = item.transform[4];
+    const y = item.transform[5];
+    // transform[0] is the item's font size along the (unrotated,
+    // unskewed) common case this app's generated PDFs and most real-
+    // world documents fall into — good enough as a per-item scale
+    // reference for "is this gap roughly a real space or just kerning".
+    const fontSize = item.transform[0] || 9;
+    const sameLine = prevY !== null && Math.abs(y - prevY) < 2;
+    const gap = sameLine && prevEndX !== null ? x - prevEndX : Infinity;
+    // A real inter-word space is comfortably wider than the near-zero gap
+    // between two items pdf.js split out of what was visually one
+    // contiguous run — confirmed directly against real extracted
+    // coordinates, not guessed. A gap can also be meaningfully NEGATIVE
+    // (not just near-zero) when a PDF places fields like a "Page X of Y"
+    // footer out of left-to-right order in the content stream — the
+    // lower bound excludes that case from "no space needed" too, since
+    // treating a large negative gap the same as a near-zero one glued
+    // unrelated words together (measured directly: a real "Page X of Y"
+    // footer came back "of1" instead of "of 1").
+    const noSpaceNeeded = gap > -1 && gap <= fontSize * 0.15;
+    // Only skip the synthetic space when nothing would separate this
+    // piece from the last — an item's own string can already end in
+    // whitespace (pdf.js sometimes emits a lone " " as its own item), and
+    // adding another one on top produced a double space that
+    // normalize()'s per-piece whitespace collapse never caught, since it
+    // only ever saw one piece at a time, never the join between two.
+    if (haystack.length > 0 && !haystack.endsWith(' ') && !noSpaceNeeded) {
+      haystack += ' ';
+      offsetToItem.push(itemIndex);
+    }
     for (let i = 0; i < piece.length; i++) offsetToItem.push(itemIndex);
     haystack += piece;
-    // Items don't include the space between text runs pdf.js inserts
-    // structurally (e.g. between words split across positioning
-    // adjustments) — approximate it with one space so a match spanning
-    // two items isn't glued together into one unmatchable word.
-    haystack += ' ';
-    offsetToItem.push(itemIndex);
+    prevEndX = x + item.width;
+    prevY = y;
   });
 
   const words = normalize(highlightText).trim().split(' ').filter(Boolean);
