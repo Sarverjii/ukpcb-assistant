@@ -96,16 +96,31 @@ export async function getCitationPreviewAction(chunkId: string): Promise<Citatio
 
 /**
  * Deletes a conversation and its messages (cascade). Ownership is enforced
- * inside deleteConversation() itself (scoped WHERE, not fetch-then-check),
- * so calling this with someone else's conversation ID just no-ops rather
- * than deleting the wrong thing or throwing a revealing error.
+ * both by getConversationForUser's own scoped WHERE (fetched first, purely
+ * to capture the title before it's gone — the row won't exist to look up
+ * afterward) and again by deleteConversation's own scoped WHERE, so
+ * calling this with someone else's conversation ID just 404s rather than
+ * deleting the wrong thing or throwing a revealing error.
  */
 export async function deleteConversationAction(conversationId: string): Promise<DeleteConversationResult> {
   const ctx = await getAuthContext();
-  const deleted = await deleteConversation(conversationId, ctx.userId);
-  if (!deleted) {
+  const conversation = await getConversationForUser(conversationId, ctx.userId);
+  if (!conversation) {
     return { error: 'Conversation not found.' };
   }
+
+  await deleteConversation(conversationId, ctx.userId);
+  await logAuditEvent({
+    action: 'CONVERSATION_DELETED',
+    result: 'SUCCESS',
+    userId: ctx.userId,
+    resource: conversationId,
+    // The conversation row is gone after this — its title/message count
+    // only survive if captured here, in the log entry itself. Same
+    // "capture everything needed at write time" discipline as every other
+    // delete action in this app (see e.g. deleteDocumentAction).
+    metadata: { conversationTitle: conversation.title, messageCount: conversation.messages.length },
+  });
   return {};
 }
 

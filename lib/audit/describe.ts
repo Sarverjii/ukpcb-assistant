@@ -82,6 +82,12 @@ export function describeAuditEvent(
       const name = str(m.documentName);
       return name ? `Previewed a citation from "${name}"` : 'Previewed a citation';
     }
+    case 'CONVERSATION_DELETED': {
+      const title = str(m.conversationTitle);
+      const count = num(m.messageCount);
+      const suffix = count !== null ? ` (${count} message${count === 1 ? '' : 's'})` : '';
+      return title ? `Deleted conversation "${title}"${suffix}` : `Deleted an untitled conversation${suffix}`;
+    }
 
     case 'EMPLOYEE_CREATED': {
       const name = str(m.employeeName);
