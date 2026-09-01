@@ -78,6 +78,16 @@ model Role {
 enum UserStatus {
   ACTIVE
   DISABLED
+  // Soft-removed: login blocked (same check as DISABLED), hidden from the
+  // main employee list, and only reachable via the dedicated "Removed
+  // employees" admin page. An admin reviews the employee's uploaded
+  // documents there (keeping or deleting each individually) before the
+  // separate, real hard-delete action becomes available — see
+  // deleteEmployeePermanentlyAction. Never set automatically; only via
+  // removeEmployeeAction. No path back to ACTIVE is built — a removal is
+  // meant to be a deliberate, one-way step toward hard-delete, not a
+  // second flavor of disable.
+  REMOVED
 }
 
 enum ThemePreference {
@@ -102,11 +112,33 @@ model User {
 
   accounts      Account[]
   sessions      Session[]
+  loginSessions LoginSession[]
   documents     Document[]     @relation("UploadedBy")
   conversations Conversation[]
   auditLogs     AuditLog[]
 
   @@index([roleId])
+}
+
+// A revocable record of one login, tracked entirely separately from Auth.js's
+// own `Session` model above (which stays dead/unused — this app's auth is
+// pure JWT, see auth.config.ts's own comment on why). Created once per
+// successful sign-in from lib/auth/auth.config.ts's authorize() callback,
+// which stashes this row's id into the JWT (token.sessionId) so
+// getAuthContext() can check `revokedAt` on every request without needing a
+// database session strategy. Lets a user see and revoke their own active
+// logins from Settings — see lib/db/queries/loginSessions.ts.
+model LoginSession {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userAgent  String?
+  ipAddress  String?
+  createdAt  DateTime  @default(now())
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+
+  @@index([userId])
 }
 
 // --- Documents & retrieval ------------------------------------------------
@@ -141,8 +173,14 @@ model Document {
   clearanceLevel  Int
   department      String?
   tags            String[]       @default([])
-  uploadedById    String
-  uploadedBy      User           @relation("UploadedBy", fields: [uploadedById], references: [id])
+  // Nullable so a hard-deleted employee (see deleteEmployeePermanentlyAction)
+  // never forces their documents to be deleted along with them — the FK
+  // just goes to null (onDelete: SetNull) and every "uploaded by" display
+  // falls back to a fixed "Removed employee" label. Deleting the document
+  // itself, if that's what's wanted, is always a separate, explicit choice
+  // an admin makes on the removed-employee review page beforehand.
+  uploadedById    String?
+  uploadedBy      User?          @relation("UploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
   status          DocumentStatus @default(PENDING)
   processingError String?
   createdAt       DateTime       @default(now())
@@ -193,7 +231,13 @@ model DocumentChunk {
 model Conversation {
   id        String    @id @default(cuid())
   userId    String
-  user      User      @relation(fields: [userId], references: [id])
+  // Cascade (not the default Restrict): when an employee is hard-deleted
+  // (deleteEmployeePermanentlyAction), their conversations — and, via
+  // Message's own cascade below, every message in them — are deleted along
+  // with them. This is the one piece of a removed employee's data that is
+  // NOT preserved, by explicit user decision; contrast with Document and
+  // AuditLog, which both survive with the reference nulled out instead.
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -224,6 +268,11 @@ model Message {
   // always read alongside a conversation's already-indexed messages,
   // never queried standalone.
   feedback       MessageFeedback?
+  // Set only when a USER message has been edited (see updateMessageContent)
+  // — null for every ASSISTANT message and every USER message that hasn't
+  // been touched. Purely informational (renders a small "(edited)" marker);
+  // nothing reads it to decide behavior.
+  editedAt       DateTime?
   createdAt      DateTime     @default(now())
 
   @@index([conversationId])

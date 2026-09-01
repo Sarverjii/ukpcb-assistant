@@ -1,7 +1,9 @@
 import { getAuthContext } from '@/lib/auth/session';
 import { prisma } from '@/lib/db/prisma';
+import { listSessionsForUser } from '@/lib/db/queries/loginSessions';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { ChangePasswordForm } from '@/components/settings/ChangePasswordForm';
+import { SessionsList } from '@/components/settings/SessionsList';
 
 export default async function SettingsPage() {
   const ctx = await getAuthContext();
@@ -9,10 +11,10 @@ export default async function SettingsPage() {
   // it — see prisma/schema.prisma's note that it's an unused extension
   // point for future dept-scoped ACLs), so it's fetched directly here just
   // to display it.
-  const user = await prisma.user.findUniqueOrThrow({
-    where: { id: ctx.userId },
-    select: { department: true },
-  });
+  const [user, sessions] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { id: ctx.userId }, select: { department: true } }),
+    listSessionsForUser(ctx.userId),
+  ]);
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
@@ -35,6 +37,25 @@ export default async function SettingsPage() {
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Appearance</h2>
         <div className="mt-4 rounded-lg border border-zinc-200 dark:border-zinc-800">
           <ThemeToggle initialTheme={ctx.themePreference} />
+        </div>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Active sessions</h2>
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          Everywhere you&apos;re currently signed in. Sign out of anything you don&apos;t recognize.
+        </p>
+        <div className="mt-4">
+          <SessionsList
+            sessions={sessions.map((s) => ({
+              id: s.id,
+              userAgent: s.userAgent,
+              ipAddress: s.ipAddress,
+              createdAt: s.createdAt.toISOString(),
+              lastSeenAt: s.lastSeenAt.toISOString(),
+            }))}
+            currentSessionId={ctx.loginSessionId}
+          />
         </div>
       </section>
 

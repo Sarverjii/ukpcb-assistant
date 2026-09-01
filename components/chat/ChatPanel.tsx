@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowUp, Copy, Check, RotateCw, Download, ChevronDown, FileText, FileDown, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { ArrowUp, Copy, Check, RotateCw, Download, ChevronDown, FileText, FileDown, ThumbsUp, ThumbsDown, Pencil, Paperclip, X } from 'lucide-react';
 import { streamChat } from '@/components/chat/streamChat';
 import { Markdown } from '@/components/chat/Markdown';
 import { useCitationPreview, type Citation } from '@/components/chat/CitationPreviewContext';
@@ -18,17 +18,24 @@ export type ChatMessage = {
   content: string;
   citations?: Citation[];
   feedback?: MessageFeedback | null;
+  editedAt?: string | null;
 };
+
+type AvailableDocument = { id: string; name: string };
 
 export function ChatPanel({
   conversationId,
   initialMessages,
   initialTitle,
+  availableDocuments,
 }: {
   // null = the stateless "/chat" draft — no conversation exists yet.
   conversationId: string | null;
   initialMessages: ChatMessage[];
   initialTitle: string | null;
+  // Every document this viewer is cleared to see, for the composer's
+  // "scope to document(s)" picker (Feature 3) — id/name is all it needs.
+  availableDocuments: AvailableDocument[];
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [input, setInput] = useState('');
@@ -39,10 +46,28 @@ export function ChatPanel({
   // answer is actually final. Distinct from `pending`, which also covers
   // the moment between clicking send and the first token arriving.
   const [streamingId, setStreamingId] = useState<string | null>(null);
+  // Documents the next question should be scoped to — cleared after every
+  // send, same "picked per-question, not sticky" behavior a scope picker
+  // implies. Not carried into regenerate or edit (see streamChat's own
+  // comment on why regenerate can't carry it).
+  const [scopedDocumentIds, setScopedDocumentIds] = useState<string[]>([]);
+  const [showDocPicker, setShowDocPicker] = useState(false);
   const { openCitation } = useCitationPreview();
   const router = useRouter();
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // A plain incrementing counter, not Date.now()/crypto.randomUUID() — this
+  // function (handleEditMessage) also reads `messages` directly rather than
+  // only through a setState updater's `prev`, and the two combined trips
+  // react-hooks/purity's "impure call" check even though this only ever
+  // runs from a click handler. A ref-backed counter sidesteps the question
+  // entirely (still guaranteed unique within this component instance) and
+  // needs no such workaround.
+  const localIdCounter = useRef(0);
+  function nextLocalId(prefix: 'local-user' | 'local-assistant'): string {
+    localIdCounter.current += 1;
+    return `${prefix}-${localIdCounter.current}`;
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -93,10 +118,12 @@ export function ChatPanel({
       { id: assistantMessageId, role: 'ASSISTANT', content: '' },
     ]);
     setStreamingId(assistantMessageId);
+    const scopeForThisSend = scopedDocumentIds.length > 0 ? scopedDocumentIds : undefined;
+    setScopedDocumentIds([]);
 
     startTransition(async () => {
       try {
-        await streamChat({ conversationId, question }, (event) => {
+        await streamChat({ conversationId, question, scopedDocumentIds: scopeForThisSend }, (event) => {
           if (event.type === 'delta') {
             appendDelta(assistantMessageId, event.text);
           } else if (event.type === 'done') {
@@ -160,6 +187,55 @@ export function ChatPanel({
     });
   }
 
+  // Edits message `messageId` in place and wipes everything after it —
+  // mirrors handleRegenerate's shape (splice, set streamingId, stream, then
+  // reconcile the placeholder id on `done`), just with two differences: the
+  // edited message's own content changes too, and every message after it
+  // (not just one assistant reply) is dropped from local state, matching
+  // exactly what the server side does (see the route's editMessageId mode).
+  function handleEditMessage(messageId: string, newContent: string) {
+    if (!conversationId || pending) return;
+    const targetIndex = messages.findIndex((m) => m.id === messageId);
+    if (targetIndex === -1) return;
+
+    setError(null);
+    const assistantMessageId = nextLocalId('local-assistant');
+    setMessages((prev) => [
+      ...prev.slice(0, targetIndex),
+      // A client-only "yes, this was just edited" marker — the real
+      // editedAt timestamp lives server-side; this just needs to be
+      // truthy so the "(edited)" label renders immediately rather than
+      // waiting for a reload. Not Date.now()-based, for the same
+      // react-hooks/purity reason nextLocalId exists.
+      { ...prev[targetIndex], content: newContent, editedAt: 'just now' },
+      { id: assistantMessageId, role: 'ASSISTANT', content: '' },
+    ]);
+    setStreamingId(assistantMessageId);
+
+    startTransition(async () => {
+      try {
+        await streamChat({ conversationId, editMessageId: messageId, content: newContent }, (event) => {
+          if (event.type === 'delta') {
+            appendDelta(assistantMessageId, event.text);
+          } else if (event.type === 'done') {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMessageId ? { ...m, id: event.messageId, citations: event.citations } : m,
+              ),
+            );
+            router.refresh();
+          } else if (event.type === 'error') {
+            appendStreamError(assistantMessageId, event.message);
+          }
+        });
+      } catch {
+        setError('Could not save that edit. Please try again.');
+      } finally {
+        setStreamingId(null);
+      }
+    });
+  }
+
   // Optimistic, with rollback on a failed server action — matches how
   // citations/content are already lifted into this component's `messages`
   // state rather than kept local to MessageBlock, so feedback survives a
@@ -191,6 +267,67 @@ export function ChatPanel({
 
   const inputBar = (
     <>
+      {availableDocuments.length > 0 && (
+        <div className="mx-auto mb-2 flex w-full max-w-3xl flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setShowDocPicker((o) => !o)}
+            className="flex items-center gap-1 rounded-full border border-dashed border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs text-zinc-500 dark:text-zinc-400 hover:border-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
+          >
+            <Paperclip size={11} />
+            {scopedDocumentIds.length > 0 ? `Scoped to ${scopedDocumentIds.length}` : 'Scope to document(s)'}
+          </button>
+          {scopedDocumentIds.map((id) => {
+            const doc = availableDocuments.find((d) => d.id === id);
+            if (!doc) return null;
+            return (
+              <span
+                key={id}
+                className="flex items-center gap-1 rounded-full bg-brand-50 dark:bg-brand-950 px-2.5 py-1 text-xs text-brand-700 dark:text-brand-300"
+              >
+                {doc.name}
+                <button
+                  type="button"
+                  onClick={() => setScopedDocumentIds((prev) => prev.filter((x) => x !== id))}
+                  aria-label={`Remove ${doc.name} from scope`}
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            );
+          })}
+          {showDocPicker && (
+            <div className="relative w-full">
+              <div className="absolute bottom-1 z-10 max-h-60 w-full max-w-xs overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1 shadow-lg">
+                {availableDocuments.map((doc) => (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() => {
+                      setScopedDocumentIds((prev) =>
+                        prev.includes(doc.id) ? prev.filter((x) => x !== doc.id) : [...prev, doc.id],
+                      );
+                    }}
+                    className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 ${
+                      scopedDocumentIds.includes(doc.id) ? 'text-brand-700 dark:text-brand-300' : 'text-zinc-700 dark:text-zinc-200'
+                    }`}
+                  >
+                    {doc.name}
+                    {scopedDocumentIds.includes(doc.id) && <Check size={13} />}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setShowDocPicker(false)}
+                  className="mt-1 w-full border-t border-zinc-100 dark:border-zinc-800 px-3 py-1.5 text-left text-xs text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
       <form
         onSubmit={handleSubmit}
         className="mx-auto flex w-full max-w-3xl items-end gap-2 rounded-3xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-4 py-2.5 shadow-sm focus-within:border-zinc-300 dark:focus-within:border-zinc-600"
@@ -268,6 +405,11 @@ export function ChatPanel({
                   ? (next) => handleFeedback(m.id, next)
                   : undefined
               }
+              onEdit={
+                m.role === 'USER' && !m.id.startsWith('local-') && !pending
+                  ? (content) => handleEditMessage(m.id, content)
+                  : undefined
+              }
               onCitationClick={openCitation}
             />
           ))}
@@ -342,6 +484,7 @@ function MessageBlock({
   isStreaming,
   onRegenerate,
   onFeedbackChange,
+  onEdit,
   onCitationClick,
 }: {
   message: ChatMessage;
@@ -349,10 +492,13 @@ function MessageBlock({
   isStreaming: boolean;
   onRegenerate?: () => void;
   onFeedbackChange?: (feedback: MessageFeedback | null) => void;
+  onEdit?: (newContent: string) => void;
   onCitationClick: (citation: Citation) => void;
 }) {
   const isUser = message.role === 'USER';
   const [copied, setCopied] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(message.content);
 
   async function handleCopy() {
     try {
@@ -365,10 +511,64 @@ function MessageBlock({
   }
 
   if (isUser) {
+    if (isEditing) {
+      return (
+        <div className="flex justify-end">
+          <div className="w-full max-w-[85%] sm:max-w-[75%] rounded-2xl border border-brand-300 dark:border-brand-700 bg-white dark:bg-zinc-900 p-2.5">
+            <textarea
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={Math.min(8, draft.split('\n').length + 1)}
+              className="w-full resize-none bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none"
+            />
+            <div className="mt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft(message.content);
+                  setIsEditing(false);
+                }}
+                className="rounded-md px-2.5 py-1 text-xs text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!draft.trim() || draft.trim() === message.content}
+                onClick={() => {
+                  setIsEditing(false);
+                  onEdit?.(draft.trim());
+                }}
+                className="rounded-md bg-brand-700 dark:bg-brand-600 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40"
+              >
+                Save &amp; regenerate
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
-      <div className="flex justify-end">
+      <div className="group flex flex-col items-end gap-1">
         <div className="max-w-[85%] sm:max-w-[75%] rounded-2xl bg-zinc-100 dark:bg-zinc-800 px-4 py-2.5 text-sm text-zinc-900 dark:text-zinc-100 whitespace-pre-wrap break-words">
           {message.content}
+        </div>
+        <div className="flex items-center gap-2 pr-1 text-xs text-zinc-400">
+          {message.editedAt && <span>(edited)</span>}
+          {onEdit && (
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(message.content);
+                setIsEditing(true);
+              }}
+              className="flex items-center gap-1 opacity-0 group-hover:opacity-100 hover:text-zinc-600 dark:hover:text-zinc-300"
+            >
+              <Pencil size={11} />
+              Edit
+            </button>
+          )}
         </div>
       </div>
     );

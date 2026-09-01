@@ -4,6 +4,16 @@ import { PrismaAdapter } from '@auth/prisma-adapter';
 import { prisma } from '@/lib/db/prisma';
 import { verifyPassword } from '@/lib/auth/password';
 import { logAuditEvent } from '@/lib/audit/log';
+import { createLoginSession } from '@/lib/db/queries/loginSessions';
+
+// First value of X-Forwarded-For (or the platform-specific equivalent) is
+// the original client — nothing else in this app has captured IP before
+// now (AuditLog.ipAddress has sat unused since it was added), so this is
+// the first real caller of it.
+function clientIp(request: Request): string | undefined {
+  const forwarded = request.headers.get('x-forwarded-for');
+  return forwarded?.split(',')[0]?.trim() || undefined;
+}
 
 // Session strategy note: Auth.js's Credentials provider only officially
 // supports JWT sessions (database sessions are for OAuth-style adapter
@@ -35,7 +45,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         email: { label: 'Email', type: 'email' },
         password: { label: 'Password', type: 'password' },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         const email = credentials?.email;
         const password = credentials?.password;
         if (typeof email !== 'string' || typeof password !== 'string') {
@@ -63,18 +73,33 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
         await logAuditEvent({ action: 'LOGIN', result: 'SUCCESS', userId: user.id });
 
-        // Only id/name/email go into the token — never role or clearance.
-        return { id: user.id, name: user.name, email: user.email };
+        // A revocable record of this specific sign-in — see LoginSession's
+        // schema comment. Its id rides along in the JWT (jwt callback below)
+        // purely so getAuthContext() can check it hasn't been revoked.
+        const loginSession = await createLoginSession({
+          userId: user.id,
+          userAgent: request.headers.get('user-agent') ?? undefined,
+          ipAddress: clientIp(request),
+        });
+
+        // Only id/name/email/sessionId go into the token — never role or
+        // clearance (see the file-level comment above).
+        return { id: user.id, name: user.name, email: user.email, sessionId: loginSession.id };
       },
     }),
   ],
   callbacks: {
     async jwt({ token, user }) {
       if (user?.id) token.sub = user.id;
+      // user is only present on the initial sign-in call — this is the one
+      // moment sessionId is available to copy onto the token; every later
+      // call just carries the value already on token forward untouched.
+      if (user?.sessionId) token.sessionId = user.sessionId;
       return token;
     },
     async session({ session, token }) {
       if (session.user && token.sub) session.user.id = token.sub;
+      if (session.user && token.sessionId) session.user.sessionId = token.sessionId;
       return session;
     },
   },

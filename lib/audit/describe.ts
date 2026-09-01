@@ -115,6 +115,30 @@ export function describeAuditEvent(
       const count = num(m.conversationCount);
       return name ? `Viewed ${name}'s conversations (${count ?? 0})` : "Viewed an employee's conversations";
     }
+    case 'EMPLOYEE_REMOVED': {
+      const name = str(m.employeeName);
+      return name ? `Removed employee ${name}` : 'Removed an employee';
+    }
+    case 'EMPLOYEE_DELETED': {
+      const name = str(m.employeeName);
+      const convos = num(m.conversationCount);
+      const kept = num(m.documentsKeptCount);
+      const parts: string[] = [];
+      if (convos) parts.push(`${convos} conversation${convos === 1 ? '' : 's'} deleted`);
+      if (kept) parts.push(`${kept} document${kept === 1 ? '' : 's'} kept`);
+      const suffix = parts.length ? ` (${parts.join(', ')})` : '';
+      return name ? `Permanently deleted employee ${name}${suffix}` : `Permanently deleted an employee${suffix}`;
+    }
+    case 'EMPLOYEE_BULK_IMPORTED': {
+      const success = num(m.successCount);
+      const total = num(m.rowCount);
+      const fileName = str(m.fileName);
+      const suffix = fileName ? ` from "${fileName}"` : '';
+      if (success !== null && total !== null) {
+        return `Bulk-imported ${success} of ${total} employee${total === 1 ? '' : 's'}${suffix}`;
+      }
+      return `Bulk-imported employees${suffix}`;
+    }
 
     case 'PASSWORD_CHANGED':
       return 'Changed their own password';
@@ -138,6 +162,11 @@ export function describeAuditEvent(
       }
       return `Changed "${role}"'s settings`;
     }
+
+    case 'ADMIN_REAUTH_FAILED':
+      return resource
+        ? `Entered the wrong password confirming: ${resource}`
+        : 'Entered the wrong password confirming an admin action';
 
     case 'ACCESS_DENIED': {
       if (resource === 'admin') return 'Blocked: tried to open the admin dashboard without access';

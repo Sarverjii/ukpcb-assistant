@@ -9,6 +9,9 @@ import {
   deleteMessage,
   deleteConversation,
   renameConversation,
+  updateMessageContent,
+  deleteMessagesByIds,
+  searchConversationsByContent,
 } from '@/lib/db/queries/conversations';
 import { getChunkForUser } from '@/lib/db/queries/chunks';
 import { logAuditEvent } from '@/lib/audit/log';
@@ -33,6 +36,19 @@ export async function renameConversationAction(
   const renamed = await renameConversation(conversationId, ctx.userId, trimmed.slice(0, MAX_TITLE_LENGTH));
   if (!renamed) return { error: 'Conversation not found.' };
   return {};
+}
+
+/**
+ * Content search across the caller's own conversations — Sidebar's
+ * existing filter only ever matched titles (nothing else in the prop it
+ * receives has message content), so this is a genuine new round trip, not
+ * a client-side filter tweak. Called debounced from the Sidebar as the
+ * user types; ownership is scoped inside searchConversationsByContent's
+ * own WHERE.
+ */
+export async function searchConversationsAction(query: string) {
+  const ctx = await getAuthContext();
+  return searchConversationsByContent(ctx.userId, query);
 }
 
 export type CitationPreviewResult =
@@ -231,6 +247,42 @@ export async function regenerateMessage(conversationId: string, assistantMessage
 
   await deleteMessage(assistantMessageId);
   const result = await answerQuestion(ctx, conversationId, question, history);
+  const newMessage = await appendMessage(conversationId, 'ASSISTANT', result.text, result.citations);
+  await touchConversation(conversationId);
+
+  return { ...result, messageId: newMessage.id };
+}
+
+/**
+ * Non-streaming counterpart of the stream route's editMessageId mode — kept
+ * in sync for tests/authz.test.ts and any future non-streaming caller, same
+ * as regenerateMessage above; the live chat UI uses the streaming route
+ * exclusively. Wipes every message after the edited one and regenerates
+ * from a history that stops at the edit point, per the exact same contract
+ * documented on the route.
+ */
+export async function editMessage(conversationId: string, messageId: string, newContent: string) {
+  const ctx = await getAuthContext();
+
+  const conversation = await getConversationForUser(conversationId, ctx.userId);
+  if (!conversation) throw new Error('Conversation not found.');
+
+  const targetIndex = conversation.messages.findIndex((m) => m.id === messageId);
+  if (targetIndex < 0 || conversation.messages[targetIndex].role !== 'USER') {
+    throw new Error('Message not found.');
+  }
+
+  const trimmed = newContent.trim();
+  const history: ChatTurn[] = conversation.messages.slice(0, targetIndex).map((m) => ({
+    role: m.role === 'USER' ? 'user' : 'assistant',
+    content: m.content,
+  }));
+
+  await updateMessageContent(messageId, ctx.userId, trimmed);
+  const idsToDelete = conversation.messages.slice(targetIndex + 1).map((m) => m.id);
+  await deleteMessagesByIds(idsToDelete);
+
+  const result = await answerQuestion(ctx, conversationId, trimmed, history);
   const newMessage = await appendMessage(conversationId, 'ASSISTANT', result.text, result.citations);
   await touchConversation(conversationId);
 

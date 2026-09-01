@@ -42,6 +42,9 @@ async function authContextFor(email: string): Promise<AuthContext> {
     canUploadDocuments: user.role.canUploadDocuments,
     isAdmin: user.role.isAdmin,
     themePreference: user.themePreference,
+    // No real login session in these tests — every code path under test
+    // (answerQuestion/streamAnswer et al.) is session-agnostic.
+    loginSessionId: null,
   };
 }
 

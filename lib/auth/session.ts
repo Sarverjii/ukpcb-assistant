@@ -1,5 +1,6 @@
 import { auth } from '@/lib/auth/auth.config';
 import { prisma } from '@/lib/db/prisma';
+import { getLoginSessionById, touchLoginSession } from '@/lib/db/queries/loginSessions';
 
 export class UnauthenticatedError extends Error {
   constructor() {
@@ -17,6 +18,10 @@ export type AuthContext = {
   canUploadDocuments: boolean;
   isAdmin: boolean;
   themePreference: 'LIGHT' | 'DARK';
+  // The current LoginSession's id — null for a token issued before this
+  // feature existed (see the backward-compat note below). Lets Settings'
+  // "Active sessions" list mark which row is the one the viewer is on.
+  loginSessionId: string | null;
 };
 
 /**
@@ -39,6 +44,19 @@ export async function getAuthContext(): Promise<AuthContext> {
 
   if (!user || user.status !== 'ACTIVE') throw new UnauthenticatedError();
 
+  // sessionId is absent only on a token issued before this feature shipped
+  // (it'll get a real LoginSession on the user's next fresh login) —
+  // treated as trusted rather than force-logging out every existing
+  // session at deploy time. Once present, a missing or revoked row ends
+  // the session immediately, same effect as a disabled/removed account.
+  const loginSessionId = session.user.sessionId ?? null;
+  if (loginSessionId) {
+    const loginSession = await getLoginSessionById(loginSessionId);
+    if (!loginSession || loginSession.revokedAt) throw new UnauthenticatedError();
+    // Best-effort, throttled — never block the request on this.
+    touchLoginSession(loginSessionId, loginSession.lastSeenAt).catch(() => {});
+  }
+
   return {
     userId: user.id,
     name: user.name,
@@ -48,5 +66,6 @@ export async function getAuthContext(): Promise<AuthContext> {
     canUploadDocuments: user.role.canUploadDocuments,
     isAdmin: user.role.isAdmin,
     themePreference: user.themePreference,
+    loginSessionId,
   };
 }

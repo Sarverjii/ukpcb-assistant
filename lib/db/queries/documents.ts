@@ -68,6 +68,46 @@ export function listDocumentsWithUploader(maxClearanceRank?: number) {
   });
 }
 
+/**
+ * Every document a specific employee uploaded, regardless of status —
+ * backs the "Removed employees" review page (Feature 7), where an admin
+ * decides, per document, whether to keep it (survives with uploadedById
+ * set to null once the employee is hard-deleted) or delete it via the
+ * existing deleteDocumentAction before that happens.
+ */
+export function listDocumentsByUploader(uploadedById: string) {
+  return prisma.document.findMany({
+    where: { uploadedById },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+/**
+ * Read-only "browse what I'm cleared to see" list for the employee-facing
+ * document library (Feature 2) — distinct from listDocumentsWithUploader
+ * (management page: leaks uploader email, shows non-READY documents) and
+ * listAccessibleDocumentSummaries (too narrow: no department/tags/dates,
+ * built for the RAG document-inventory prompt, not a browsing UI).
+ * Deliberately never takes an isAdmin bypass — every viewer, admin
+ * included, sees only what their own clearanceRank allows here.
+ */
+export function listAccessibleDocumentSummariesForBrowsing(userClearanceRank: number) {
+  return prisma.document.findMany({
+    where: { clearanceLevel: { lte: userClearanceRank }, status: 'READY' },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      department: true,
+      tags: true,
+      clearanceLevel: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+    orderBy: { name: 'asc' },
+  });
+}
+
 export function updateDocumentClearance(id: string, clearanceLevel: number) {
   return prisma.document.update({ where: { id }, data: { clearanceLevel } });
 }

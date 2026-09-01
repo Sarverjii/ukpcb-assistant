@@ -54,7 +54,10 @@ export function KnowledgeBase({
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Upload documents</h2>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
           Every document needs a clearance level. You can only assign one at or below your own —
-          {roles.length > 0 ? ` up to ${roles[roles.length - 1]?.name ?? roles[0].name}.` : ' contact an admin for access.'}
+          {/* `roles` is availableRoles from the page, sourced from listRolesByRank()'s
+              DESCENDING hierarchyRank order — roles[0] is the highest-ranked (i.e. the
+              viewer's own) role still in the filtered list, not roles[roles.length - 1]. */}
+          {roles.length > 0 ? ` up to ${roles[0].name}.` : ' contact an admin for access.'}
         </p>
         <div className="mt-4">
           <UploadForm

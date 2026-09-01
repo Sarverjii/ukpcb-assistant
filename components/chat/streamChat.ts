@@ -13,7 +13,14 @@ export type StreamEvent =
  * a normal streamed Response needs no extra client library.
  */
 export async function streamChat(
-  body: { conversationId: string | null; question?: string; regenerateMessageId?: string },
+  body: {
+    conversationId: string | null;
+    question?: string;
+    regenerateMessageId?: string;
+    editMessageId?: string;
+    content?: string;
+    scopedDocumentIds?: string[];
+  },
   onEvent: (event: StreamEvent) => void,
 ): Promise<void> {
   const res = await fetch('/api/chat/stream', {

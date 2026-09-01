@@ -6,6 +6,8 @@ import {
   appendMessage,
   touchConversation,
   deleteMessage,
+  updateMessageContent,
+  deleteMessagesByIds,
 } from '@/lib/db/queries/conversations';
 import { prisma } from '@/lib/db/prisma';
 import { streamAnswer } from '@/lib/rag/chat';
@@ -26,6 +28,17 @@ type StreamRequestBody = {
   conversationId: string | null;
   question?: string;
   regenerateMessageId?: string;
+  // Edit-a-sent-message mode: editMessageId is the USER message being
+  // edited, content is its new text. Mutually exclusive with question and
+  // regenerateMessageId.
+  editMessageId?: string;
+  content?: string;
+  // Scope this question to specific document(s) instead of corpus-wide
+  // retrieval — see lib/rag/chat.ts::retrieveContext. Not carried over on
+  // regenerate (see that branch below) — a deliberate v1 limitation, not a
+  // bug: regenerate has no fresh client input today for anything beyond
+  // the message id.
+  scopedDocumentIds?: string[];
 };
 
 /**
@@ -39,12 +52,14 @@ type StreamRequestBody = {
  * The client (ChatPanel.tsx) reads the body with a plain reader and
  * appends "delta" text to the message it's rendering as it arrives.
  *
- * Handles both "send a new message" (question set) and "regenerate an
- * existing answer" (regenerateMessageId set) — mirrors sendMessage() /
- * regenerateMessage() in ./chat/actions.ts, which remain in place
- * unstreamed for tests/authz.test.ts and any future non-streaming caller,
- * but are no longer used by the chat UI itself now that this route covers
- * both paths with streaming.
+ * Handles three modes: "send a new message" (question set), "regenerate an
+ * existing answer" (regenerateMessageId set), and "edit a sent message"
+ * (editMessageId + content set — deletes everything after it and
+ * regenerates from a history that stops at the edit point). Mirrors
+ * sendMessage() / regenerateMessage() in ./chat/actions.ts, which remain in
+ * place unstreamed for tests/authz.test.ts and any future non-streaming
+ * caller, but are no longer used by the chat UI itself now that this route
+ * covers every path with streaming.
  */
 export async function POST(request: Request) {
   let ctx;
@@ -58,8 +73,8 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => null)) as StreamRequestBody | null;
-  if (!body || (!body.question && !body.regenerateMessageId)) {
-    return NextResponse.json({ error: 'question or regenerateMessageId is required.' }, { status: 400 });
+  if (!body || (!body.question && !body.regenerateMessageId && !body.editMessageId)) {
+    return NextResponse.json({ error: 'question, regenerateMessageId, or editMessageId is required.' }, { status: 400 });
   }
 
   let conversationId = body.conversationId;
@@ -85,6 +100,35 @@ export async function POST(request: Request) {
       content: m.content,
     }));
     await deleteMessage(body.regenerateMessageId);
+  } else if (body.editMessageId) {
+    if (!conversationId) {
+      return NextResponse.json({ error: 'conversationId is required to edit.' }, { status: 400 });
+    }
+    const newContent = body.content?.trim();
+    if (!newContent) {
+      return NextResponse.json({ error: 'content is required to edit.' }, { status: 400 });
+    }
+    const conversation = await getConversationForUser(conversationId, ctx.userId);
+    if (!conversation) {
+      return NextResponse.json({ error: 'Conversation not found.' }, { status: 404 });
+    }
+    const targetIndex = conversation.messages.findIndex((m) => m.id === body.editMessageId);
+    if (targetIndex < 0 || conversation.messages[targetIndex].role !== 'USER') {
+      return NextResponse.json({ error: 'Message not found.' }, { status: 404 });
+    }
+    // History is everything strictly BEFORE the edited message — the
+    // edited message itself is passed as `question` below, so together
+    // they're exactly "the conversation up through the edit point", per
+    // spec: editing message N wipes everything after it and the model
+    // sees only messages 1..N for its regenerated reply.
+    question = newContent;
+    history = conversation.messages.slice(0, targetIndex).map((m) => ({
+      role: m.role === 'USER' ? 'user' : 'assistant',
+      content: m.content,
+    }));
+    await updateMessageContent(body.editMessageId, ctx.userId, newContent);
+    const idsToDelete = conversation.messages.slice(targetIndex + 1).map((m) => m.id);
+    await deleteMessagesByIds(idsToDelete);
   } else {
     question = body.question!;
     if (!conversationId) {
@@ -121,7 +165,9 @@ export async function POST(request: Request) {
       }
 
       try {
-        const gen = streamAnswer(ctx, finalConversationId, question, history);
+        // Not carried over on regenerate — see StreamRequestBody's comment.
+        const scopedDocumentIds = body.regenerateMessageId ? undefined : body.scopedDocumentIds;
+        const gen = streamAnswer(ctx, finalConversationId, question, history, scopedDocumentIds);
         let next = await gen.next();
         while (!next.done) {
           send({ type: 'delta', text: next.value });

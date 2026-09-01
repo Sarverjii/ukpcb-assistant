@@ -6,6 +6,7 @@ import { hashPassword, verifyPassword } from '@/lib/auth/password';
 import { logAuditEvent } from '@/lib/audit/log';
 import { prisma } from '@/lib/db/prisma';
 import { getUserById, updateUserPasswordHash } from '@/lib/db/queries/users';
+import { revokeSession } from '@/lib/db/queries/loginSessions';
 
 export async function logoutAction() {
   try {
@@ -73,4 +74,23 @@ export async function changePasswordAction(formData: FormData): Promise<ChangePa
   await logAuditEvent({ action: 'PASSWORD_CHANGED', result: 'SUCCESS', userId: ctx.userId });
 
   return { success: true };
+}
+
+export type RevokeSessionResult = { error?: string };
+
+/**
+ * Self-service "sign out this device" — same self-service trust level as
+ * changePasswordAction above, no admin re-auth needed. Ownership-scoped in
+ * revokeSession's own WHERE, so a session id belonging to someone else's
+ * account just matches zero rows. Revoking the CURRENT session is allowed
+ * (and does exactly what it sounds like: the next request under that
+ * session fails getAuthContext()'s revocation check and is treated as
+ * signed out) — the client is responsible for redirecting to /login itself
+ * when it does this to its own session.
+ */
+export async function revokeSessionAction(sessionId: string): Promise<RevokeSessionResult> {
+  const ctx = await getAuthContext();
+  const revoked = await revokeSession(sessionId, ctx.userId);
+  if (!revoked) return { error: 'Session not found.' };
+  return {};
 }

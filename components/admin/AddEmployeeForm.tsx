@@ -2,20 +2,21 @@
 
 import { useState, useRef, useTransition } from 'react';
 import { createEmployeeAction } from '@/app/(app)/admin/employees/actions';
+import { EmailPreviewModal } from '@/components/admin/EmailPreviewModal';
+import type { ComposedEmail } from '@/lib/employees/emailCompose';
 
 type Role = { id: string; name: string; hierarchyRank: number };
 
 export function AddEmployeeForm({ roles }: { roles: Role[] }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tempPassword, setTempPassword] = useState<string | null>(null);
+  const [previewEmail, setPreviewEmail] = useState<ComposedEmail | null>(null);
   const [pending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-    setTempPassword(null);
     const formData = new FormData(e.currentTarget);
     startTransition(async () => {
       const result = await createEmployeeAction(formData);
@@ -23,7 +24,7 @@ export function AddEmployeeForm({ roles }: { roles: Role[] }) {
         setError(result.error);
         return;
       }
-      setTempPassword(result.tempPassword ?? null);
+      if (result.email) setPreviewEmail(result.email);
       formRef.current?.reset();
     });
   }
@@ -84,15 +85,10 @@ export function AddEmployeeForm({ roles }: { roles: Role[] }) {
             </button>
             {error && <p className="text-sm text-red-600">{error}</p>}
           </div>
-
-          {tempPassword && (
-            <p className="col-span-1 rounded-md bg-emerald-50 dark:bg-emerald-950 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-300 sm:col-span-2 break-words">
-              Employee created. Temporary password (share this with them out of band — it won&apos;t be
-              shown again): <code className="font-mono">{tempPassword}</code>
-            </p>
-          )}
         </form>
       )}
+
+      {previewEmail && <EmailPreviewModal email={previewEmail} onClose={() => setPreviewEmail(null)} />}
     </div>
   );
 }

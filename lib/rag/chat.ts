@@ -135,6 +135,7 @@ async function retrieveContext(
   ctx: AuthContext,
   question: string,
   conversationHistory: ChatTurn[],
+  scopedDocumentIds?: string[],
 ): Promise<RetrievedContext> {
   const retrievalQuery = await buildRetrievalQuery(conversationHistory, question);
 
@@ -149,8 +150,21 @@ async function retrieveContext(
   // (but not actually useful) chunks. See CHAT_SYSTEM_PROMPT for why the
   // old relevant.length === 0 gate was a real bug. Filtered by the same
   // clearance rule as chunk retrieval. Also doubles as the candidate list
-  // for matchDocumentsByName below.
+  // for matchDocumentsByName below. Fetched even in scoped mode (below) —
+  // harmless, and still lets the model reason about "what else exists".
   const accessibleDocuments = await listAccessibleDocumentSummaries(ctx.clearanceRank);
+  const documentInventory = accessibleDocuments.map(({ name, description }) => ({ name, description }));
+
+  // The user explicitly picked which document(s) to answer from (Feature 3
+  // — a chat-composer document picker) — skip corpus-wide vector search
+  // and name-matching entirely and pull only from the picked set.
+  // retrieveChunksForDocuments re-checks clearance in SQL regardless of
+  // what ids are passed, so a tampered/inaccessible id just yields zero
+  // chunks for it, never a bypass — same boundary as every other path.
+  if (scopedDocumentIds && scopedDocumentIds.length > 0) {
+    const relevant = await retrieveChunksForDocuments(scopedDocumentIds, queryEmbedding, ctx.clearanceRank);
+    return { relevant, documentInventory, retrievalQuery };
+  }
 
   const vectorChunks = await retrieveAuthorizedChunks(queryEmbedding, ctx.clearanceRank, TOP_K);
 
@@ -176,8 +190,6 @@ async function retrieveContext(
   const chunks = mergeChunks(vectorChunks, nameMatchedChunks);
   const relevant = chunks.filter((c) => c.similarity >= SIMILARITY_THRESHOLD || c.matchedByDocumentName);
 
-  const documentInventory = accessibleDocuments.map(({ name, description }) => ({ name, description }));
-
   return { relevant, documentInventory, retrievalQuery };
 }
 
@@ -199,6 +211,7 @@ async function logChatQueryAudit(
   retrievalQuery: string,
   relevant: RetrievedChunk[],
   answerText: string,
+  scopedDocumentIds?: string[],
 ): Promise<void> {
   const gotNoAuthorizedInfoAnswer = answerText === NO_AUTHORIZED_INFO_ANSWER;
   await logAuditEvent({
@@ -217,6 +230,7 @@ async function logChatQueryAudit(
       // still letting retrieval quality on multi-turn conversations be
       // debugged later from the audit log.
       ...(retrievalQuery !== question ? { retrievalQuery } : {}),
+      ...(scopedDocumentIds && scopedDocumentIds.length > 0 ? { scopedDocumentIds } : {}),
     },
   });
 }
@@ -226,8 +240,14 @@ export async function answerQuestion(
   conversationId: string,
   question: string,
   conversationHistory: ChatTurn[],
+  scopedDocumentIds?: string[],
 ): Promise<AnswerResult> {
-  const { relevant, documentInventory, retrievalQuery } = await retrieveContext(ctx, question, conversationHistory);
+  const { relevant, documentInventory, retrievalQuery } = await retrieveContext(
+    ctx,
+    question,
+    conversationHistory,
+    scopedDocumentIds,
+  );
 
   const llm = getLLMProvider();
   const { text, citedChunkIds } = await llm.generateAnswer({
@@ -239,7 +259,7 @@ export async function answerQuestion(
   });
 
   const citations = buildCitations(relevant, citedChunkIds);
-  await logChatQueryAudit(ctx, conversationId, question, retrievalQuery, relevant, text);
+  await logChatQueryAudit(ctx, conversationId, question, retrievalQuery, relevant, text, scopedDocumentIds);
 
   return { text, citations };
 }
@@ -259,8 +279,14 @@ export async function* streamAnswer(
   conversationId: string,
   question: string,
   conversationHistory: ChatTurn[],
+  scopedDocumentIds?: string[],
 ): AsyncGenerator<string, AnswerResult, void> {
-  const { relevant, documentInventory, retrievalQuery } = await retrieveContext(ctx, question, conversationHistory);
+  const { relevant, documentInventory, retrievalQuery } = await retrieveContext(
+    ctx,
+    question,
+    conversationHistory,
+    scopedDocumentIds,
+  );
 
   const llm = getLLMProvider();
   let fullText = '';
@@ -279,7 +305,7 @@ export async function* streamAnswer(
   const citations = buildCitations(relevant, citedChunkIds);
   // After the last yield — every token the client will see has already
   // been sent, so this await adds no perceived latency to the stream.
-  await logChatQueryAudit(ctx, conversationId, question, retrievalQuery, relevant, fullText);
+  await logChatQueryAudit(ctx, conversationId, question, retrievalQuery, relevant, fullText, scopedDocumentIds);
 
   return { text: fullText, citations };
 }

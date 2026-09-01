@@ -101,7 +101,7 @@ export async function processDocument(documentId: string): Promise<void> {
       action: 'DOCUMENT_PROCESSED',
       result: 'SUCCESS',
       resource: documentId,
-      userId: doc.uploadedById,
+      userId: doc.uploadedById ?? undefined,
       metadata: { chunkCount: chunks.length, clearanceLevel: doc.clearanceLevel },
     });
   } catch (err) {

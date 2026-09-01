@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { getAuthContext } from '@/lib/auth/session';
 import { getConversationForUser } from '@/lib/db/queries/conversations';
+import { listAccessibleDocumentSummaries } from '@/lib/db/queries/documents';
 import { ChatPanel, type ChatMessage } from '@/components/chat/ChatPanel';
 
 export default async function ConversationPage({
@@ -12,7 +13,10 @@ export default async function ConversationPage({
   // Scoped to the caller in the query itself (WHERE userId = ...) — a
   // conversation ID belonging to another user simply doesn't match and
   // renders a 404, never someone else's messages.
-  const conversation = await getConversationForUser(id, ctx.userId);
+  const [conversation, documents] = await Promise.all([
+    getConversationForUser(id, ctx.userId),
+    listAccessibleDocumentSummaries(ctx.clearanceRank),
+  ]);
   if (!conversation) notFound();
 
   const initialMessages: ChatMessage[] = conversation.messages.map((m) => ({
@@ -21,6 +25,7 @@ export default async function ConversationPage({
     content: m.content,
     citations: (m.citations as ChatMessage['citations']) ?? undefined,
     feedback: m.feedback,
+    editedAt: m.editedAt ? m.editedAt.toISOString() : null,
   }));
 
   // key={conversation.id} forces a full remount on navigation between
@@ -34,6 +39,7 @@ export default async function ConversationPage({
       conversationId={conversation.id}
       initialMessages={initialMessages}
       initialTitle={conversation.title}
+      availableDocuments={documents.map((d) => ({ id: d.id, name: d.name }))}
     />
   );
 }

@@ -6,9 +6,18 @@ import {
   changeEmployeeRoleAction,
   toggleEmployeeStatusAction,
   resetEmployeePasswordAction,
+  removeEmployeeAction,
 } from '@/app/(app)/admin/employees/actions';
 import { LocalTime } from '@/components/admin/LocalTime';
+import { ReauthDialog } from '@/components/admin/ReauthDialog';
+import { EmailPreviewModal } from '@/components/admin/EmailPreviewModal';
+import type { ComposedEmail } from '@/lib/employees/emailCompose';
 
+// listUsersWithRole (the sole source of this table's rows) excludes REMOVED
+// employees entirely, but the underlying column type is the full UserStatus
+// enum — kept honest here rather than narrowed, since a REMOVED row reaching
+// this component by mistake should be a visible type/runtime surprise, not
+// silently coerced away.
 type User = {
   id: string;
   name: string;
@@ -16,7 +25,7 @@ type User = {
   department: string | null;
   roleId: string;
   roleName: string;
-  status: 'ACTIVE' | 'DISABLED';
+  status: 'ACTIVE' | 'DISABLED' | 'REMOVED';
   lastLoginAt: string | null;
 };
 type Role = { id: string; name: string };
@@ -115,10 +124,13 @@ export function EmployeesTable({
   );
 }
 
+type ReauthAction = 'toggleStatus' | 'resetPassword' | 'remove';
+
 function EmployeeRow({ user, roles, isSelf }: { user: User; roles: Role[]; isSelf: boolean }) {
   const [pending, startTransition] = useTransition();
-  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reauthAction, setReauthAction] = useState<ReauthAction | null>(null);
+  const [previewEmail, setPreviewEmail] = useState<ComposedEmail | null>(null);
 
   function handleRoleChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const roleId = e.target.value;
@@ -129,22 +141,20 @@ function EmployeeRow({ user, roles, isSelf }: { user: User; roles: Role[]; isSel
     });
   }
 
-  function handleToggleStatus() {
-    setError(null);
-    startTransition(async () => {
-      const result = await toggleEmployeeStatusAction(user.id);
-      if (result.error) setError(result.error);
-    });
+  async function confirmToggleStatus(password: string) {
+    const result = await toggleEmployeeStatusAction(user.id, password);
+    if (!result.error && result.email) setPreviewEmail(result.email);
+    return result;
   }
 
-  function handleResetPassword() {
-    setError(null);
-    setMessage(null);
-    startTransition(async () => {
-      const result = await resetEmployeePasswordAction(user.id);
-      if (result.error) setError(result.error);
-      else setMessage(`New temporary password: ${result.tempPassword}`);
-    });
+  async function confirmResetPassword(password: string) {
+    const result = await resetEmployeePasswordAction(user.id, password);
+    if (!result.error && result.email) setPreviewEmail(result.email);
+    return result;
+  }
+
+  async function confirmRemove(password: string) {
+    return removeEmployeeAction(user.id, password);
   }
 
   return (
@@ -191,7 +201,7 @@ function EmployeeRow({ user, roles, isSelf }: { user: User; roles: Role[]; isSel
           <button
             type="button"
             disabled={isSelf || pending}
-            onClick={handleToggleStatus}
+            onClick={() => setReauthAction('toggleStatus')}
             className="rounded-md border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
           >
             {user.status === 'ACTIVE' ? 'Disable' : 'Enable'}
@@ -199,15 +209,57 @@ function EmployeeRow({ user, roles, isSelf }: { user: User; roles: Role[]; isSel
           <button
             type="button"
             disabled={pending}
-            onClick={handleResetPassword}
+            onClick={() => setReauthAction('resetPassword')}
             className="rounded-md border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
           >
             Reset password
           </button>
+          <button
+            type="button"
+            disabled={isSelf || pending}
+            onClick={() => setReauthAction('remove')}
+            className="rounded-md border border-red-300 dark:border-red-800 px-2 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50"
+          >
+            Remove
+          </button>
         </div>
         {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
-        {message && <p className="mt-1 text-xs text-emerald-700 font-mono">{message}</p>}
       </td>
+
+      {reauthAction === 'toggleStatus' && (
+        <ReauthDialog
+          title={user.status === 'ACTIVE' ? `Disable ${user.name}` : `Enable ${user.name}`}
+          description={
+            user.status === 'ACTIVE'
+              ? 'They will immediately be signed out and unable to log in.'
+              : 'They will be able to log in again immediately.'
+          }
+          confirmLabel={user.status === 'ACTIVE' ? 'Disable' : 'Enable'}
+          destructive={user.status === 'ACTIVE'}
+          onConfirm={confirmToggleStatus}
+          onClose={() => setReauthAction(null)}
+        />
+      )}
+      {reauthAction === 'resetPassword' && (
+        <ReauthDialog
+          title={`Reset password for ${user.name}`}
+          description="A new temporary password will be generated immediately."
+          confirmLabel="Reset password"
+          onConfirm={confirmResetPassword}
+          onClose={() => setReauthAction(null)}
+        />
+      )}
+      {reauthAction === 'remove' && (
+        <ReauthDialog
+          title={`Remove ${user.name}`}
+          description="Blocks their login and moves them to Removed employees, where you can review any documents they uploaded before permanently deleting the account. This does not delete anything yet."
+          confirmLabel="Remove"
+          destructive
+          onConfirm={confirmRemove}
+          onClose={() => setReauthAction(null)}
+        />
+      )}
+      {previewEmail && <EmailPreviewModal email={previewEmail} onClose={() => setPreviewEmail(null)} />}
     </tr>
   );
 }

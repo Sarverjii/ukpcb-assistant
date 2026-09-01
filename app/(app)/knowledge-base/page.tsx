@@ -61,7 +61,10 @@ export default async function KnowledgeBasePage() {
           documents={documents.map((d) => ({
             id: d.id,
             name: d.name,
-            uploadedByName: d.uploadedBy.name,
+            // uploadedBy is null once that employee has been hard-deleted
+            // (see deleteEmployeePermanentlyAction) — the document itself is
+            // deliberately kept, just with its uploader reference cleared.
+            uploadedByName: d.uploadedBy?.name ?? 'Removed employee',
             clearanceLevel: d.clearanceLevel,
             department: d.department,
             status: d.status,

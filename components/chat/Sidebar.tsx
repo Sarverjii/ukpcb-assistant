@@ -13,7 +13,7 @@ import {
   Search,
   X,
 } from 'lucide-react';
-import { deleteConversationAction, renameConversationAction } from '@/app/(chat)/chat/actions';
+import { deleteConversationAction, renameConversationAction, searchConversationsAction } from '@/app/(chat)/chat/actions';
 import { ProfileMenu } from '@/components/ProfileMenu';
 import { LAST_CONVERSATION_STORAGE_KEY } from '@/lib/lastConversation';
 
@@ -50,6 +50,12 @@ export function Sidebar({
   // drawer is always shown "full" (or not at all) — see mobileOpen above.
   const [collapsed, setCollapsed] = useState(false);
   const [search, setSearch] = useState('');
+  // Conversation ids matched by MESSAGE CONTENT (not title) for the current
+  // search — a genuine server round trip, debounced, kept separate from the
+  // instant client-side title filter below rather than replacing it, so
+  // title matches still appear immediately while content matches catch up.
+  const [contentMatchIds, setContentMatchIds] = useState<Set<string>>(new Set());
+  const [searchingContent, setSearchingContent] = useState(false);
   const pathname = usePathname();
 
   function toggleCollapsed() {
@@ -60,11 +66,44 @@ export function Sidebar({
   // list is small (dozens, not thousands) and already fetched for the
   // layout, so filtering it in the browser avoids yet another DB round
   // trip on a deployment where those are measurably expensive (see
-  // vercel.json's region-pin comment).
+  // vercel.json's region-pin comment). Content search below is the one
+  // exception — title alone genuinely isn't enough, and that data was
+  // never in this prop to begin with.
   const q = search.trim().toLowerCase();
   const filteredConversations = q
-    ? conversations.filter((c) => (c.title || 'New conversation').toLowerCase().includes(q))
+    ? conversations.filter((c) => (c.title || 'New conversation').toLowerCase().includes(q) || contentMatchIds.has(c.id))
     : conversations;
+
+  useEffect(() => {
+    // Every setState call here happens inside the timeout callback, never
+    // synchronously in the effect body itself — including the "clear" path
+    // for an empty search, via a zero-delay timer rather than an early
+    // return, so this stays a plain "subscribe, react later" effect rather
+    // than one that updates state on every render pass.
+    const trimmed = search.trim();
+    let cancelled = false;
+    const timer = setTimeout(
+      () => {
+        if (cancelled) return;
+        if (!trimmed) {
+          setContentMatchIds(new Set());
+          setSearchingContent(false);
+          return;
+        }
+        setSearchingContent(true);
+        searchConversationsAction(trimmed).then((matches) => {
+          if (cancelled) return;
+          setContentMatchIds(new Set(matches.map((m) => m.conversationId)));
+          setSearchingContent(false);
+        });
+      },
+      trimmed ? 300 : 0,
+    );
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [search]);
 
   return (
     <>
@@ -86,6 +125,7 @@ export function Sidebar({
             totalConversationCount={conversations.length}
             search={search}
             onSearchChange={setSearch}
+            searchingContent={searchingContent}
             pathname={pathname}
             headerAction={{ icon: <PanelLeftClose size={17} />, label: 'Collapse sidebar', onClick: toggleCollapsed }}
           />
@@ -111,6 +151,7 @@ export function Sidebar({
           totalConversationCount={conversations.length}
           search={search}
           onSearchChange={setSearch}
+          searchingContent={searchingContent}
           pathname={pathname}
           headerAction={{ icon: <X size={17} />, label: 'Close sidebar', onClick: onCloseMobile }}
           onNavigate={onCloseMobile}
@@ -170,6 +211,7 @@ function SidebarContent({
   totalConversationCount,
   search,
   onSearchChange,
+  searchingContent,
   pathname,
   headerAction,
   onNavigate,
@@ -183,6 +225,7 @@ function SidebarContent({
   totalConversationCount: number;
   search: string;
   onSearchChange: (value: string) => void;
+  searchingContent: boolean;
   pathname: string;
   headerAction: { icon: React.ReactNode; label: string; onClick: () => void };
   onNavigate?: () => void;
@@ -229,7 +272,10 @@ function SidebarContent({
               placeholder="Search conversations…"
               className="w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1.5 pl-7 pr-6 text-xs text-zinc-700 dark:text-zinc-200 outline-none placeholder:text-zinc-400 focus:border-brand-400"
             />
-            {search && (
+            {search && searchingContent && (
+              <span className="absolute right-1.5 top-1/2 h-2.5 w-2.5 -translate-y-1/2 animate-spin rounded-full border border-zinc-300 border-t-brand-500 dark:border-zinc-700" />
+            )}
+            {search && !searchingContent && (
               <button
                 type="button"
                 onClick={() => onSearchChange('')}
