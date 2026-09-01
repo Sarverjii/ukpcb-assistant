@@ -10,10 +10,15 @@ import { DocumentLibraryTable } from '@/components/documents/DocumentLibraryTabl
 // exists" — unlike the management page's admin-sees-all behavior.
 export default async function DocumentLibraryPage() {
   const ctx = await getAuthContext();
-  const [documents, roles] = await Promise.all([
+  const [documents, allRoles] = await Promise.all([
     listAccessibleDocumentSummariesForBrowsing(ctx.clearanceRank),
     listRolesByRank(),
   ]);
+  // Capped to the viewer's own rank regardless of isAdmin — this page never
+  // shows a document above the viewer's own clearance (see the query above),
+  // so a filter option for a level they could never see anything at would
+  // just be dead UI, even for an admin.
+  const roles = allRoles.filter((r) => r.hierarchyRank <= ctx.clearanceRank);
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
@@ -33,6 +38,7 @@ export default async function DocumentLibraryPage() {
             updatedAt: d.updatedAt.toISOString(),
           }))}
           roles={roles.map((r) => ({ hierarchyRank: r.hierarchyRank, name: r.name }))}
+          isAdmin={ctx.isAdmin}
         />
       </div>
     </main>

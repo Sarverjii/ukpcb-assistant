@@ -22,7 +22,18 @@ type Role = { hierarchyRank: number; name: string };
  * pattern as DocumentsTable, at the same corpus size this app already
  * reasons about elsewhere (dozens to low hundreds).
  */
-export function DocumentLibraryTable({ documents, roles }: { documents: LibraryDocument[]; roles: Role[] }) {
+export function DocumentLibraryTable({
+  documents,
+  roles,
+  isAdmin,
+}: {
+  documents: LibraryDocument[];
+  roles: Role[];
+  // Clearance/department filters are admin-only — a regular employee sees
+  // only what their own clearance already lets through, so filtering by
+  // clearance or department adds nothing for them but UI clutter.
+  isAdmin: boolean;
+}) {
   const [search, setSearch] = useState('');
   const [clearanceFilter, setClearanceFilter] = useState('ALL');
   const departments = Array.from(new Set(documents.map((d) => d.department).filter(Boolean))) as string[];
@@ -48,19 +59,21 @@ export function DocumentLibraryTable({ documents, roles }: { documents: LibraryD
           placeholder="Search by name or description…"
           className="w-full max-w-xs rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm outline-none focus:border-brand-500"
         />
-        <select
-          value={clearanceFilter}
-          onChange={(e) => setClearanceFilter(e.target.value)}
-          className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
-        >
-          <option value="ALL">All clearances</option>
-          {roles.map((r) => (
-            <option key={r.hierarchyRank} value={r.hierarchyRank}>
-              {r.name}
-            </option>
-          ))}
-        </select>
-        {departments.length > 0 && (
+        {isAdmin && (
+          <select
+            value={clearanceFilter}
+            onChange={(e) => setClearanceFilter(e.target.value)}
+            className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
+          >
+            <option value="ALL">All clearances</option>
+            {roles.map((r) => (
+              <option key={r.hierarchyRank} value={r.hierarchyRank}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {isAdmin && departments.length > 0 && (
           <select
             value={departmentFilter}
             onChange={(e) => setDepartmentFilter(e.target.value)}
@@ -81,7 +94,13 @@ export function DocumentLibraryTable({ documents, roles }: { documents: LibraryD
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {filtered.map((d) => (
-          <div key={d.id} className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-zinc-800 p-4">
+          <a
+            key={d.id}
+            href={`/api/documents/${d.id}/view`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex flex-col gap-2 rounded-lg border border-zinc-200 dark:border-zinc-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 hover:shadow-sm transition-colors"
+          >
             <p className="text-sm font-medium text-zinc-900 dark:text-white">{d.name}</p>
             {d.description && (
               <p className="line-clamp-2 text-xs text-zinc-500 dark:text-zinc-400">{d.description}</p>
@@ -104,7 +123,7 @@ export function DocumentLibraryTable({ documents, roles }: { documents: LibraryD
                 </span>
               ))}
             </div>
-          </div>
+          </a>
         ))}
         {filtered.length === 0 && (
           <p className="col-span-full py-6 text-center text-sm text-zinc-400">No documents match.</p>
