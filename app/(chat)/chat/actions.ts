@@ -109,6 +109,35 @@ export async function deleteConversationAction(conversationId: string): Promise<
   return {};
 }
 
+export type SetMessageFeedbackResult = { error?: string };
+
+/**
+ * Toggleable thumbs up/down on one assistant message. A single scoped
+ * updateMany, same "scope the query in its own WHERE, don't fetch-then-
+ * check" ownership principle as deleteConversation above — id, ASSISTANT-
+ * only, and conversation.userId all live in the WHERE, so a message
+ * belonging to someone else's conversation just matches zero rows rather
+ * than being fetched and rejected. The client always passes the target
+ * value explicitly (it already knows the message's current feedback from
+ * its own state), so this stays a blind write — no read-before-write
+ * round trip, and toggle-vs-set is a client-side decision, not a server
+ * concern. Not audited: a freely-reversible UI preference, not a
+ * security-relevant action — consistent with Copy/Regenerate clicks also
+ * going unaudited.
+ */
+export async function setMessageFeedbackAction(
+  messageId: string,
+  feedback: 'UP' | 'DOWN' | null,
+): Promise<SetMessageFeedbackResult> {
+  const ctx = await getAuthContext();
+  const { count } = await prisma.message.updateMany({
+    where: { id: messageId, role: 'ASSISTANT', conversation: { userId: ctx.userId } },
+    data: { feedback },
+  });
+  if (count === 0) return { error: 'Message not found.' };
+  return {};
+}
+
 function autoTitle(question: string): string {
   const trimmed = question.trim().replace(/\s+/g, ' ');
   return trimmed.length > 48 ? `${trimmed.slice(0, 48)}…` : trimmed;

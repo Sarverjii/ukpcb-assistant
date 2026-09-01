@@ -7,12 +7,17 @@ import { AuditLogFilters } from '@/components/admin/AuditLogFilters';
 export default async function AuditLogPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string; action?: string; result?: string; q?: string }>;
+  searchParams: Promise<{ page?: string; action?: string; result?: string; q?: string; noAnswer?: string }>;
 }) {
-  const { page: pageParam, action, result, q } = await searchParams;
+  const { page: pageParam, action, result, q, noAnswer } = await searchParams;
   const page = Math.max(1, Number(pageParam) || 1);
-  const filters = { action: action || undefined, result: result || undefined, q: q || undefined };
-  const isFiltered = Boolean(filters.action || filters.result || filters.q);
+  const filters = {
+    action: action || undefined,
+    result: result || undefined,
+    q: q || undefined,
+    noAuthorizedInfoAnswer: noAnswer === '1' || undefined,
+  };
+  const isFiltered = Boolean(filters.action || filters.result || filters.q || filters.noAuthorizedInfoAnswer);
 
   const [{ entries, total, totalPages }, distinctActions, roles] = await Promise.all([
     listAuditLogs(page, filters),
@@ -26,6 +31,7 @@ export default async function AuditLogPage({
     if (filters.action) params.set('action', filters.action);
     if (filters.result) params.set('result', filters.result);
     if (filters.q) params.set('q', filters.q);
+    if (filters.noAuthorizedInfoAnswer) params.set('noAnswer', '1');
     params.set('page', String(p));
     return `/admin/audit-logs?${params.toString()}`;
   }

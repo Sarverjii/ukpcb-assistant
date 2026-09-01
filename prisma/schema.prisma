@@ -217,9 +217,21 @@ model Message {
   // [{ documentId, documentName, chunkId }] — only ever populated from
   // chunks the asking user was already authorized to retrieve.
   citations      Json?
+  // Thumbs up/down on an ASSISTANT message — nullable and toggleable
+  // (clicking the active value again clears it back to null). Enforced
+  // as assistant-only at the query layer (setMessageFeedbackAction),
+  // not here — a USER message simply never gets this set. No index: it's
+  // always read alongside a conversation's already-indexed messages,
+  // never queried standalone.
+  feedback       MessageFeedback?
   createdAt      DateTime     @default(now())
 
   @@index([conversationId])
+}
+
+enum MessageFeedback {
+  UP
+  DOWN
 }
 
 // --- Audit log ---------------------------------------------------------

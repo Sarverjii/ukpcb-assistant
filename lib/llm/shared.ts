@@ -1,5 +1,5 @@
 import type { RetrievedChunk } from '@/lib/db/queries/chunks';
-import type { DocumentSummary } from '@/lib/llm/types';
+import type { ChatTurn, DocumentSummary } from '@/lib/llm/types';
 
 // Shared by every LLMProvider implementation (Anthropic, Ollama, ...) so the
 // context-assembly and citation-extraction logic — the parts that actually
@@ -82,4 +82,49 @@ export function extractCitedChunkIds(text: string, contextChunks: RetrievedChunk
     }
   }
   return [...citedRefs].map((ref) => contextChunks[ref - 1]?.id).filter((id): id is string => Boolean(id));
+}
+
+/**
+ * Shared by every LLMProvider's condenseQuestion() — one prompt, so a
+ * follow-up gets rewritten the same way regardless of which model answers.
+ * Deliberately terse instructions plus an explicit "return ONLY the
+ * question" — this is a single-shot, unsupervised completion with no
+ * system/user role separation to lean on for compliance the way
+ * generateAnswer has CHAT_SYSTEM_PROMPT, so the instruction has to carry
+ * the whole weight itself. sanitizeCondensedQuestion below is what
+ * actually protects against the model not fully complying.
+ */
+export function buildCondensePrompt(history: ChatTurn[], question: string): string {
+  const historyText = history.map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`).join('\n');
+  return `Given this conversation history and a follow-up question, rewrite the follow-up as a standalone question that contains all the context needed to understand it without the history — resolve pronouns and implicit references (e.g. "it", "that", "what about X") into the actual subject being discussed. If the follow-up is already standalone, return it completely unchanged. Reply with ONLY the rewritten question — no preamble, no quotes, no explanation, nothing else.
+
+Conversation history:
+${historyText}
+
+Follow-up question: ${question}
+
+Standalone question:`;
+}
+
+/**
+ * Defensive post-processing against a model that didn't fully follow
+ * buildCondensePrompt's "return ONLY the question" instruction — confirmed
+ * worth having, not hypothetical: real single-shot completions from every
+ * provider family occasionally add a label ("Standalone question: ..."),
+ * wrap the answer in quotes, or add a trailing explanation on a second
+ * line. Falls back to the original, un-condensed question — never throws,
+ * never returns empty — so a malformed rewrite degrades to "retrieval
+ * behaves like it did before this feature existed" rather than breaking
+ * retrieval outright.
+ */
+export function sanitizeCondensedQuestion(raw: string, original: string): string {
+  let text = raw.trim();
+  text = text.replace(/^(standalone question|rewritten question|rewrite)\s*:\s*/i, '');
+  text = (text.split('\n')[0] ?? '').trim();
+  text = text.replace(/^["']|["']$/g, '').trim();
+  // Empty, or implausibly long for a single question — a sign the model
+  // ignored the "ONLY the question" instruction and this is a fragment of
+  // something else — both fall back rather than risk embedding garbage.
+  if (!text || text.length > 500) return original;
+  return text;
 }

@@ -63,7 +63,15 @@ export function AuditLogFilters({ actions }: { actions: string[] }) {
           </option>
         ))}
       </select>
-      {(searchParams.get('q') || searchParams.get('action') || searchParams.get('result')) && (
+      <label className="flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-300">
+        <input
+          type="checkbox"
+          checked={searchParams.get('noAnswer') === '1'}
+          onChange={(e) => updateParam('noAnswer', e.target.checked ? '1' : '')}
+        />
+        No answer found
+      </label>
+      {(searchParams.get('q') || searchParams.get('action') || searchParams.get('result') || searchParams.get('noAnswer')) && (
         <button
           type="button"
           onClick={() => {

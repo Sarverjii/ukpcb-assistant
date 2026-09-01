@@ -51,3 +51,10 @@ export function updateUserPasswordHash(userId: string, passwordHash: string) {
 export function getUserById(userId: string) {
   return prisma.user.findUniqueOrThrow({ where: { id: userId }, include: { role: true } });
 }
+
+/** Same as getUserById, but returns null on a bad id instead of throwing —
+ * for the admin employee-conversations pages, which need to notFound()
+ * cleanly on an id from the URL rather than crash. */
+export function getUserByIdOrNull(userId: string) {
+  return prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
+}

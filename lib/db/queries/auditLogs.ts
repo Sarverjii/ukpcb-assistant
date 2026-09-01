@@ -23,6 +23,11 @@ export type AuditLogFilters = {
    * 'Julius'" or "what did Priya do" actually work, not just exact-id
    * lookups. */
   q?: string;
+  /** Only CHAT_QUERY events where the model gave the fixed "not enough
+   * information" fallback — see lib/rag/chat.ts::logChatQueryAudit for
+   * where this gets set. This is the "gap tracking" filter: every entry
+   * it surfaces is a real content gap, not a guess from retrieval stats. */
+  noAuthorizedInfoAnswer?: boolean;
 };
 
 /**
@@ -50,6 +55,12 @@ export async function listAuditLogs(
     conditions.push(
       Prisma.sql`(u.name ILIKE ${like} OR u.email ILIKE ${like} OR al.resource ILIKE ${like} OR al.metadata::text ILIKE ${like})`,
     );
+  }
+  if (filters.noAuthorizedInfoAnswer) {
+    // metadata is jsonb (confirmed against the real column type, not
+    // assumed) — @> containment is the indexable, correct way to check
+    // one boolean key without pulling the whole blob through ::text.
+    conditions.push(Prisma.sql`al.metadata @> '{"gotNoAuthorizedInfoAnswer": true}'::jsonb`);
   }
   const whereClause = conditions.length > 0 ? Prisma.sql`WHERE ${Prisma.join(conditions, ' AND ')}` : Prisma.empty;
 
@@ -83,4 +94,34 @@ export async function listDistinctAuditActions(): Promise<string[]> {
     orderBy: { action: 'asc' },
   });
   return rows.map((r) => r.action);
+}
+
+export type UnansweredQuestionEntry = {
+  id: string;
+  createdAt: Date;
+  question: string | null;
+  userName: string | null;
+  userEmail: string | null;
+  conversationId: string | null;
+};
+
+/**
+ * The Admin Overview page's "recent unanswered questions" widget — a
+ * flat, most-recent-first list of real content gaps (see
+ * AuditLogFilters.noAuthorizedInfoAnswer's doc comment for what qualifies
+ * an entry). Deliberately not deduped/clustered — grouping near-duplicate
+ * questions is a genuinely separate feature (would need embedding +
+ * clustering the questions themselves), out of scope here; the full,
+ * filterable history is reachable via listAuditLogs for deeper digging.
+ */
+export async function listRecentUnansweredQuestions(limit = 10): Promise<UnansweredQuestionEntry[]> {
+  return prisma.$queryRaw<UnansweredQuestionEntry[]>`
+    SELECT al.id, al."createdAt", al.metadata->>'question' AS question,
+           u.name AS "userName", u.email AS "userEmail", al.resource AS "conversationId"
+    FROM "AuditLog" al
+    LEFT JOIN "User" u ON u.id = al."userId"
+    WHERE al.action = 'CHAT_QUERY' AND al.metadata @> '{"gotNoAuthorizedInfoAnswer": true}'::jsonb
+    ORDER BY al."createdAt" DESC
+    LIMIT ${limit}
+  `;
 }

@@ -20,6 +20,7 @@ export default async function ConversationPage({
     role: m.role,
     content: m.content,
     citations: (m.citations as ChatMessage['citations']) ?? undefined,
+    feedback: m.feedback,
   }));
 
   // key={conversation.id} forces a full remount on navigation between

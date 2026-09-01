@@ -9,11 +9,17 @@ import { matchDocumentsByName } from '@/lib/rag/documentNameMatch';
 import { getEmbeddingProvider } from '@/lib/embeddings';
 import { getLLMProvider } from '@/lib/llm';
 import { extractCitedChunkIds } from '@/lib/llm/shared';
-import { CHAT_SYSTEM_PROMPT } from '@/lib/llm/promptTemplates';
+import { CHAT_SYSTEM_PROMPT, NO_AUTHORIZED_INFO_ANSWER } from '@/lib/llm/promptTemplates';
 import { logAuditEvent } from '@/lib/audit/log';
 import type { ChatTurn } from '@/lib/llm/types';
 
 const SIMILARITY_THRESHOLD = 0.3;
+// Last N history messages fed to the query-condensing step (~3 exchanges)
+// — enough to resolve almost any real follow-up's pronouns/implicit
+// references, small enough to keep that call fast and cheap rather than
+// growing with the whole conversation. Retrieval quality on a follow-up
+// depends on the last couple of turns' topic, not the full transcript.
+const MAX_CONDENSE_HISTORY_MESSAGES = 6;
 // Was 6 — too small for the corpus this now actually holds (35 documents,
 // 353 chunks). Confirmed directly: for "how many projects have we worked
 // on", the one chunk that actually answers it (a stats overview — "500+
@@ -77,21 +83,63 @@ export type AnswerResult = { text: string; citations: Citation[] };
 type RetrievedContext = {
   relevant: RetrievedChunk[];
   documentInventory: { name: string; description: string | null }[];
+  // The text actually embedded for retrieval — equal to `question` on a
+  // first message or whenever condensing declined/failed, or a rewritten
+  // standalone version on a follow-up turn. Threaded out so the caller can
+  // log it (only when it actually differs — see logChatQueryAudit) without
+  // retrieveContext needing to know anything about audit logging itself.
+  retrievalQuery: string;
 };
+
+/**
+ * Rewrites a follow-up question into a standalone one before it's embedded
+ * for retrieval — e.g. "what about the pricing?" right after a question
+ * about a specific project becomes "what is the pricing for [project]?".
+ * Embedding the raw follow-up alone finds nothing relevant, since it
+ * lacks the entity/topic actually being asked about; this is what makes a
+ * multi-turn conversation retrieve as well as a single, fully-specified
+ * question would.
+ *
+ * Returns `question` unchanged, with no LLM call at all, whenever there's
+ * no history to condense against — the common first-message-in-a-
+ * conversation case pays nothing for this feature. On any failure
+ * (provider error, quota, network), falls back to the raw question rather
+ * than failing the turn — this is a retrieval quality improvement, not
+ * something the chat should ever break over.
+ */
+async function buildRetrievalQuery(conversationHistory: ChatTurn[], question: string): Promise<string> {
+  if (conversationHistory.length === 0) return question;
+  try {
+    const llm = getLLMProvider();
+    const recentHistory = conversationHistory.slice(-MAX_CONDENSE_HISTORY_MESSAGES);
+    return await llm.condenseQuestion(recentHistory, question);
+  } catch (err) {
+    console.error('[rag] condenseQuestion failed, retrieving with the raw question instead', err);
+    return question;
+  }
+}
 
 /**
  * Steps 1–2 of the flow documented above, shared by both answerQuestion()
  * (non-streaming) and streamAnswer() (streaming) — the retrieval and
  * authorization logic must behave identically regardless of which transport
  * the answer is delivered over, so it lives in exactly one place.
+ *
+ * Does NOT write the CHAT_QUERY audit event itself (it used to) — that now
+ * happens in logChatQueryAudit, called by answerQuestion/streamAnswer once
+ * the model's actual answer is known, since Feature 4's "did this question
+ * get a real answer" tracking needs the answer text, which doesn't exist
+ * yet at this point in the flow.
  */
 async function retrieveContext(
   ctx: AuthContext,
-  conversationId: string,
   question: string,
+  conversationHistory: ChatTurn[],
 ): Promise<RetrievedContext> {
+  const retrievalQuery = await buildRetrievalQuery(conversationHistory, question);
+
   const embedder = getEmbeddingProvider();
-  const [queryEmbedding] = await embedder.embed([question], 'RETRIEVAL_QUERY');
+  const [queryEmbedding] = await embedder.embed([retrievalQuery], 'RETRIEVAL_QUERY');
 
   // Document *names/descriptions*, not content — fetched every turn now,
   // regardless of whether vector retrieval also found relevant chunk
@@ -113,8 +161,12 @@ async function retrieveContext(
   // reproducible embedding-quality failure this covers (a real chunk,
   // correctly formed, containing exactly the asked-about content, that
   // still didn't crack the top 40 of 355 chunks corpus-wide, NOR the top 7
-  // of 9 within its own document, on cosine similarity alone).
-  const matchedDocumentIds = matchDocumentsByName(question, accessibleDocuments);
+  // of 9 within its own document, on cosine similarity alone). Matched
+  // against retrievalQuery, not the raw question — a condensed follow-up
+  // can newly contain a document name the raw fragment alone never would
+  // (e.g. "what about the pricing?" -> "what is the pricing for the Rent
+  // project?"), which is a real retrieval win, not just consistency.
+  const matchedDocumentIds = matchDocumentsByName(retrievalQuery, accessibleDocuments);
   const nameMatchedChunks = await retrieveChunksForDocuments(
     matchedDocumentIds,
     queryEmbedding,
@@ -124,6 +176,31 @@ async function retrieveContext(
   const chunks = mergeChunks(vectorChunks, nameMatchedChunks);
   const relevant = chunks.filter((c) => c.similarity >= SIMILARITY_THRESHOLD || c.matchedByDocumentName);
 
+  const documentInventory = accessibleDocuments.map(({ name, description }) => ({ name, description }));
+
+  return { relevant, documentInventory, retrievalQuery };
+}
+
+/**
+ * The single place CHAT_QUERY gets logged — called once each from
+ * answerQuestion/streamAnswer, after the model's answer text is already
+ * known (see retrieveContext's doc comment for why this moved out of
+ * there). `gotNoAuthorizedInfoAnswer` is what Feature 4's gap-tracking
+ * filters on: an exact match against the fixed fallback string the model
+ * is instructed to return verbatim when it can't answer from authorized
+ * content (see NO_AUTHORIZED_INFO_ANSWER's own doc comment) — a real
+ * signal that this question hit a genuine content gap, not a guess from
+ * retrieval stats alone.
+ */
+async function logChatQueryAudit(
+  ctx: AuthContext,
+  conversationId: string,
+  question: string,
+  retrievalQuery: string,
+  relevant: RetrievedChunk[],
+  answerText: string,
+): Promise<void> {
+  const gotNoAuthorizedInfoAnswer = answerText === NO_AUTHORIZED_INFO_ANSWER;
   await logAuditEvent({
     action: 'CHAT_QUERY',
     result: 'SUCCESS',
@@ -133,12 +210,15 @@ async function retrieveContext(
       userClearanceRank: ctx.clearanceRank,
       retrievedChunkIds: relevant.map((c) => c.id),
       question,
+      gotNoAuthorizedInfoAnswer,
+      // Only recorded when condensing actually changed the query (i.e.
+      // ran, and produced something different) — keeps every single-turn
+      // entry from carrying a redundant duplicate of `question`, while
+      // still letting retrieval quality on multi-turn conversations be
+      // debugged later from the audit log.
+      ...(retrievalQuery !== question ? { retrievalQuery } : {}),
     },
   });
-
-  const documentInventory = accessibleDocuments.map(({ name, description }) => ({ name, description }));
-
-  return { relevant, documentInventory };
 }
 
 export async function answerQuestion(
@@ -147,18 +227,19 @@ export async function answerQuestion(
   question: string,
   conversationHistory: ChatTurn[],
 ): Promise<AnswerResult> {
-  const { relevant, documentInventory } = await retrieveContext(ctx, conversationId, question);
+  const { relevant, documentInventory, retrievalQuery } = await retrieveContext(ctx, question, conversationHistory);
 
   const llm = getLLMProvider();
   const { text, citedChunkIds } = await llm.generateAnswer({
     systemPrompt: CHAT_SYSTEM_PROMPT,
     contextChunks: relevant,
     conversationHistory,
-    question,
+    question, // the original question — retrievalQuery is retrieval-only, never shown/sent to the model as "the question"
     documentInventory,
   });
 
   const citations = buildCitations(relevant, citedChunkIds);
+  await logChatQueryAudit(ctx, conversationId, question, retrievalQuery, relevant, text);
 
   return { text, citations };
 }
@@ -179,7 +260,7 @@ export async function* streamAnswer(
   question: string,
   conversationHistory: ChatTurn[],
 ): AsyncGenerator<string, AnswerResult, void> {
-  const { relevant, documentInventory } = await retrieveContext(ctx, conversationId, question);
+  const { relevant, documentInventory, retrievalQuery } = await retrieveContext(ctx, question, conversationHistory);
 
   const llm = getLLMProvider();
   let fullText = '';
@@ -187,7 +268,7 @@ export async function* streamAnswer(
     systemPrompt: CHAT_SYSTEM_PROMPT,
     contextChunks: relevant,
     conversationHistory,
-    question,
+    question, // the original question — retrievalQuery is retrieval-only, never shown/sent to the model as "the question"
     documentInventory,
   })) {
     fullText += delta;
@@ -196,6 +277,9 @@ export async function* streamAnswer(
 
   const citedChunkIds = extractCitedChunkIds(fullText, relevant);
   const citations = buildCitations(relevant, citedChunkIds);
+  // After the last yield — every token the client will see has already
+  // been sent, so this await adds no perceived latency to the stream.
+  await logChatQueryAudit(ctx, conversationId, question, retrievalQuery, relevant, fullText);
 
   return { text: fullText, citations };
 }

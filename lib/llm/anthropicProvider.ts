@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '@/lib/config';
-import type { GenerateAnswerParams, LLMProvider } from '@/lib/llm/types';
-import { buildUserTurn, extractCitedChunkIds } from '@/lib/llm/shared';
+import type { ChatTurn, GenerateAnswerParams, LLMProvider } from '@/lib/llm/types';
+import { buildCondensePrompt, buildUserTurn, extractCitedChunkIds, sanitizeCondensedQuestion } from '@/lib/llm/shared';
 
 function buildMessages(params: GenerateAnswerParams): Anthropic.MessageParam[] {
   const userTurn = buildUserTurn(params.contextChunks, params.question, params.documentInventory);
@@ -95,6 +95,27 @@ export class AnthropicLLMProvider implements LLMProvider {
           yield event.delta.text;
         }
       }
+    } catch (err) {
+      throw mapAnthropicError(err);
+    }
+  }
+
+  // See geminiProvider.ts's matching comment — no retry here on purpose,
+  // the caller (lib/rag/chat.ts::buildRetrievalQuery) already falls back
+  // to the raw question on any failure from this method.
+  async condenseQuestion(history: ChatTurn[], question: string): Promise<string> {
+    try {
+      const response = await getClient().messages.create({
+        model: config.ANTHROPIC_MODEL,
+        max_tokens: 200,
+        temperature: 0,
+        messages: [{ role: 'user', content: buildCondensePrompt(history, question) }],
+      });
+      const text = response.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('');
+      return sanitizeCondensedQuestion(text, question);
     } catch (err) {
       throw mapAnthropicError(err);
     }

@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { config } from '@/lib/config';
-import type { GenerateAnswerParams, LLMProvider } from '@/lib/llm/types';
-import { buildUserTurn, extractCitedChunkIds } from '@/lib/llm/shared';
+import type { ChatTurn, GenerateAnswerParams, LLMProvider } from '@/lib/llm/types';
+import { buildCondensePrompt, buildUserTurn, extractCitedChunkIds, sanitizeCondensedQuestion } from '@/lib/llm/shared';
 
 // Free-tier Google Gemini — genuinely $0 (Google's free tier, not a trial
 // credit that expires) and, unlike the local Ollama provider, a plain
@@ -192,5 +192,20 @@ export class GeminiLLMProvider implements LLMProvider {
     for await (const chunk of stream) {
       if (chunk.text) yield chunk.text;
     }
+  }
+
+  // Deliberately no retry/fallback-model machinery here, unlike
+  // generateAnswer/callWithRetry — this is a best-effort retrieval
+  // optimization with its own one-level-up fallback (see
+  // lib/rag/chat.ts::buildRetrievalQuery, which falls back to the raw
+  // question on any error from this method), so a second retry layer here
+  // would only add latency to an already-handled failure case.
+  async condenseQuestion(history: ChatTurn[], question: string): Promise<string> {
+    const response = await getClient().models.generateContent({
+      model: config.GEMINI_MODEL,
+      contents: [{ role: 'user', parts: [{ text: buildCondensePrompt(history, question) }] }],
+      config: { temperature: 0 },
+    });
+    return sanitizeCondensedQuestion(response.text ?? '', question);
   }
 }

@@ -29,7 +29,15 @@ const SECTIONS: { href: string; label: string; icon: LucideIcon }[] = [
  */
 export function AdminNav() {
   const pathname = usePathname();
-  const active = SECTIONS.find((s) => s.href === pathname) ?? SECTIONS[0];
+  // Exact match first, then prefix match for a drill-down sub-route (e.g.
+  // /admin/employees/abc123 should still highlight "Employees") — but the
+  // prefix check explicitly excludes the bare "/admin" entry, since every
+  // admin route starts with "/admin" and an unqualified prefix check would
+  // make Overview match everything before any other tab's own check ran.
+  const active =
+    SECTIONS.find((s) => s.href === pathname) ??
+    SECTIONS.find((s) => s.href !== '/admin' && pathname.startsWith(`${s.href}/`)) ??
+    SECTIONS[0];
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 

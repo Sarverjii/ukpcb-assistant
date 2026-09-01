@@ -34,4 +34,17 @@ export interface LLMProvider {
   // here; the caller (lib/rag/chat.ts::streamAnswer) accumulates the full
   // text from these deltas and extracts citations once streaming ends.
   generateAnswerStream(params: GenerateAnswerParams): AsyncGenerator<string, void, void>;
+
+  // Rewrites `question` into a standalone, context-complete version using
+  // recent conversation history — for embedding/retrieval ONLY. Never
+  // shown to the user, never persisted, never sent to generateAnswer as
+  // the actual question (see lib/rag/chat.ts::buildRetrievalQuery). A
+  // deliberately lightweight single-shot completion, not the full
+  // RAG-shaped generateAnswer path — it has no context chunks or document
+  // inventory to reason about, just history + one question. The caller is
+  // responsible for graceful fallback on failure; this method itself
+  // isn't expected to retry or fall back to a second model the way
+  // generateAnswer does, since a condensing failure should just mean
+  // "retrieve using the raw question" rather than blocking the turn.
+  condenseQuestion(history: ChatTurn[], question: string): Promise<string>;
 }

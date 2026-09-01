@@ -2,19 +2,22 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowUp, Copy, Check, RotateCw, Download, ChevronDown, FileText, FileDown } from 'lucide-react';
+import { ArrowUp, Copy, Check, RotateCw, Download, ChevronDown, FileText, FileDown, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { streamChat } from '@/components/chat/streamChat';
 import { Markdown } from '@/components/chat/Markdown';
 import { useCitationPreview, type Citation } from '@/components/chat/CitationPreviewContext';
 import { downloadConversationMarkdown, exportConversationAsPdf } from '@/components/chat/exportConversation';
 import { LAST_CONVERSATION_STORAGE_KEY } from '@/lib/lastConversation';
+import { setMessageFeedbackAction } from '@/app/(chat)/chat/actions';
 
 export type { Citation };
+export type MessageFeedback = 'UP' | 'DOWN';
 export type ChatMessage = {
   id: string;
   role: 'USER' | 'ASSISTANT';
   content: string;
   citations?: Citation[];
+  feedback?: MessageFeedback | null;
 };
 
 export function ChatPanel({
@@ -157,6 +160,28 @@ export function ChatPanel({
     });
   }
 
+  // Optimistic, with rollback on a failed server action — matches how
+  // citations/content are already lifted into this component's `messages`
+  // state rather than kept local to MessageBlock, so feedback survives a
+  // MessageBlock remount and stays visible after a reload (threaded from
+  // initialMessages, see app/(chat)/chat/[id]/page.tsx). Toggle-vs-set is
+  // decided here (the caller already knows the message's current value),
+  // not on the server — setMessageFeedbackAction stays a blind write.
+  //
+  // Deliberately NOT the same startTransition/pending used for send and
+  // regenerate above — those gate the composer and Regenerate button on
+  // "is a real answer in flight"; a feedback click is independent of that
+  // and shouldn't disable them while it round-trips.
+  function handleFeedback(messageId: string, next: MessageFeedback | null) {
+    const previous = messages.find((m) => m.id === messageId)?.feedback ?? null;
+    setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, feedback: next } : m)));
+    void setMessageFeedbackAction(messageId, next).then((result) => {
+      if (result.error) {
+        setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, feedback: previous } : m)));
+      }
+    });
+  }
+
   function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     setInput(e.target.value);
     const el = e.target;
@@ -238,6 +263,11 @@ export function ChatPanel({
                   ? () => handleRegenerate(m.id)
                   : undefined
               }
+              onFeedbackChange={
+                m.role === 'ASSISTANT' && !m.id.startsWith('local-')
+                  ? (next) => handleFeedback(m.id, next)
+                  : undefined
+              }
               onCitationClick={openCitation}
             />
           ))}
@@ -311,12 +341,14 @@ function MessageBlock({
   isLastAssistant,
   isStreaming,
   onRegenerate,
+  onFeedbackChange,
   onCitationClick,
 }: {
   message: ChatMessage;
   isLastAssistant: boolean;
   isStreaming: boolean;
   onRegenerate?: () => void;
+  onFeedbackChange?: (feedback: MessageFeedback | null) => void;
   onCitationClick: (citation: Citation) => void;
 }) {
   const isUser = message.role === 'USER';
@@ -405,6 +437,32 @@ function MessageBlock({
               <RotateCw size={13} />
               Regenerate
             </button>
+          )}
+          {onFeedbackChange && (
+            <>
+              <button
+                type="button"
+                onClick={() => onFeedbackChange(message.feedback === 'UP' ? null : 'UP')}
+                aria-label="Good response"
+                aria-pressed={message.feedback === 'UP'}
+                className={`flex items-center rounded-md p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                  message.feedback === 'UP' ? 'text-brand-600 dark:text-brand-400' : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300'
+                }`}
+              >
+                <ThumbsUp size={13} fill={message.feedback === 'UP' ? 'currentColor' : 'none'} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onFeedbackChange(message.feedback === 'DOWN' ? null : 'DOWN')}
+                aria-label="Bad response"
+                aria-pressed={message.feedback === 'DOWN'}
+                className={`flex items-center rounded-md p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                  message.feedback === 'DOWN' ? 'text-red-600 dark:text-red-400' : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300'
+                }`}
+              >
+                <ThumbsDown size={13} fill={message.feedback === 'DOWN' ? 'currentColor' : 'none'} />
+              </button>
+            </>
           )}
         </div>
       )}

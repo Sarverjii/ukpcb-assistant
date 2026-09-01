@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import Link from 'next/link';
 import {
   changeEmployeeRoleAction,
   toggleEmployeeStatusAction,
@@ -181,6 +182,12 @@ function EmployeeRow({ user, roles, isSelf }: { user: User; roles: Role[]; isSel
       </td>
       <td className="px-3 py-2">
         <div className="flex flex-wrap gap-2">
+          <Link
+            href={`/admin/employees/${user.id}`}
+            className="rounded-md border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800"
+          >
+            View conversations
+          </Link>
           <button
             type="button"
             disabled={isSelf || pending}

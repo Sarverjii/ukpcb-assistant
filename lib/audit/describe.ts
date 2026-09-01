@@ -73,7 +73,10 @@ export function describeAuditEvent(
 
     case 'CHAT_QUERY': {
       const q = str(m.question);
-      return q ? `Asked: "${truncate(q)}"` : 'Asked a question in chat';
+      if (!q) return 'Asked a question in chat';
+      return m.gotNoAuthorizedInfoAnswer === true
+        ? `Asked (no answer found): "${truncate(q)}"`
+        : `Asked: "${truncate(q)}"`;
     }
     case 'CITATION_PREVIEWED': {
       const name = str(m.documentName);
@@ -100,6 +103,11 @@ export function describeAuditEvent(
     case 'EMPLOYEE_PASSWORD_RESET': {
       const name = str(m.employeeName);
       return name ? `Reset the password for ${name}` : 'Reset an employee’s password';
+    }
+    case 'EMPLOYEE_CONVERSATIONS_VIEWED': {
+      const name = str(m.employeeName);
+      const count = num(m.conversationCount);
+      return name ? `Viewed ${name}'s conversations (${count ?? 0})` : "Viewed an employee's conversations";
     }
 
     case 'PASSWORD_CHANGED':
