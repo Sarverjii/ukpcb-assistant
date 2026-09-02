@@ -96,7 +96,7 @@ export function extractCitedChunkIds(text: string, contextChunks: RetrievedChunk
  */
 export function buildCondensePrompt(history: ChatTurn[], question: string): string {
   const historyText = history.map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`).join('\n');
-  return `Given this conversation history and a follow-up question, rewrite the follow-up as a standalone question that contains all the context needed to understand it without the history — resolve pronouns and implicit references (e.g. "it", "that", "what about X") into the actual subject being discussed. If the follow-up is already standalone, return it completely unchanged. Reply with ONLY the rewritten question — no preamble, no quotes, no explanation, nothing else.
+  return `Given this conversation history and a follow-up question, rewrite the follow-up as a standalone question that contains all the context needed to understand it without the history — resolve pronouns and implicit references (e.g. "it", "that", "what about X") into the actual subject being discussed. When more than one thing has been discussed, resolve to the MOST RECENT and MOST SPECIFIC one — the subject of the last exchange, not a broader topic mentioned earlier just because it's also in the history. For example, if the history moves from a project to one specific award that project won, "tell me more about it" means the award, not the project, even though the project was mentioned first and more often. If the follow-up is already standalone, return it completely unchanged. Reply with ONLY the rewritten question — no preamble, no quotes, no explanation, nothing else.
 
 Conversation history:
 ${historyText}
