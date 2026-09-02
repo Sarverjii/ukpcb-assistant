@@ -58,6 +58,23 @@ body {
 }
 
 /*
+ * Prevents the page-zoom-on-focus behavior mobile Safari and Chrome for
+ * Android both apply automatically to any focused form control whose
+ * computed font-size is under 16px — most of this app's inputs/textareas
+ * use Tailwind's text-sm (14px) or text-xs (12px) for a tighter desktop
+ * layout, which triggers it every time a field is tapped on a phone. Only
+ * overridden below the sm breakpoint so desktop sizing is untouched; 16px
+ * is the documented threshold both browsers use, not an arbitrary choice.
+ */
+@media (max-width: 639px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/*
  * Minimal markdown typography for assistant chat messages
  * (components/chat/Markdown.tsx). Element-level styling (lists, code,
  * headings, links, tables) is handled per-tag via ReactMarkdown's

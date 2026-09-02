@@ -56,6 +56,7 @@ export function ChatPanel({
   const router = useRouter();
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const docPickerRef = useRef<HTMLDivElement>(null);
   // A plain incrementing counter, not Date.now()/crypto.randomUUID() — this
   // function (handleEditMessage) also reads `messages` directly rather than
   // only through a setState updater's `prev`, and the two combined trips
@@ -72,6 +73,36 @@ export function ChatPanel({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Focuses the composer on first load and every remount (a fresh page
+  // load, or navigating to a different conversation — ChatPanel is
+  // remounted via key={conversation.id}, see app/(chat)/chat/[id]/page.tsx)
+  // so typing can start immediately without clicking into the box first.
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
+
+  // The scope-document picker previously had no reliable way to close once
+  // open (the trigger button toggles it, but with a long document list the
+  // only other close point was a link at the very bottom of a scrolling
+  // list — easy to never reach). Closing on an outside click or Escape,
+  // same as ExportMenu's dropdown below, fixes that regardless of list
+  // length or scroll position.
+  useEffect(() => {
+    if (!showDocPicker) return;
+    function handleClick(e: MouseEvent) {
+      if (docPickerRef.current && !docPickerRef.current.contains(e.target as Node)) setShowDocPicker(false);
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setShowDocPicker(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [showDocPicker]);
 
   useEffect(() => {
     // Records the last real conversation viewed so "Back to chat" from
@@ -128,9 +159,15 @@ export function ChatPanel({
             appendDelta(assistantMessageId, event.text);
           } else if (event.type === 'done') {
             setMessages((prev) =>
-              prev.map((m) =>
-                m.id === assistantMessageId ? { ...m, id: event.messageId, citations: event.citations } : m,
-              ),
+              prev.map((m) => {
+                if (m.id === assistantMessageId) return { ...m, id: event.messageId, citations: event.citations };
+                // Swaps the local placeholder id for the real one as soon as
+                // it exists, so Edit (gated on !id.startsWith('local-'))
+                // becomes available on this message right away instead of
+                // only after a reload.
+                if (m.id === userMessageId && event.userMessageId) return { ...m, id: event.userMessageId };
+                return m;
+              }),
             );
             if (!conversationId) {
               // This was the draft ("/chat") state — the conversation now
@@ -151,6 +188,10 @@ export function ChatPanel({
         setError('Something went wrong answering that. Please try again.');
       } finally {
         setStreamingId(null);
+        // Back in the composer after every exchange — sending, regenerating,
+        // or editing all end here, and typing the next question shouldn't
+        // require clicking back into the box first.
+        textareaRef.current?.focus();
       }
     });
   }
@@ -183,6 +224,10 @@ export function ChatPanel({
         setError('Could not regenerate that answer. Please try again.');
       } finally {
         setStreamingId(null);
+        // Back in the composer after every exchange — sending, regenerating,
+        // or editing all end here, and typing the next question shouldn't
+        // require clicking back into the box first.
+        textareaRef.current?.focus();
       }
     });
   }
@@ -232,6 +277,10 @@ export function ChatPanel({
         setError('Could not save that edit. Please try again.');
       } finally {
         setStreamingId(null);
+        // Back in the composer after every exchange — sending, regenerating,
+        // or editing all end here, and typing the next question shouldn't
+        // require clicking back into the box first.
+        textareaRef.current?.focus();
       }
     });
   }
@@ -268,7 +317,7 @@ export function ChatPanel({
   const inputBar = (
     <>
       {availableDocuments.length > 0 && (
-        <div className="mx-auto mb-2 flex w-full max-w-3xl flex-wrap items-center gap-1.5">
+        <div ref={docPickerRef} className="mx-auto mb-2 flex w-full max-w-3xl flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={() => setShowDocPicker((o) => !o)}
@@ -298,31 +347,37 @@ export function ChatPanel({
           })}
           {showDocPicker && (
             <div className="relative w-full">
-              <div className="absolute bottom-1 z-10 max-h-60 w-full max-w-xs overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1 shadow-lg">
-                {availableDocuments.map((doc) => (
+              <div className="absolute bottom-1 z-10 w-full max-w-xs overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg">
+                <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 px-3 py-2">
+                  <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Scope to document(s)</span>
                   <button
-                    key={doc.id}
                     type="button"
-                    onClick={() => {
-                      setScopedDocumentIds((prev) =>
-                        prev.includes(doc.id) ? prev.filter((x) => x !== doc.id) : [...prev, doc.id],
-                      );
-                    }}
-                    className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 ${
-                      scopedDocumentIds.includes(doc.id) ? 'text-brand-700 dark:text-brand-300' : 'text-zinc-700 dark:text-zinc-200'
-                    }`}
+                    onClick={() => setShowDocPicker(false)}
+                    aria-label="Close"
+                    className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200"
                   >
-                    {doc.name}
-                    {scopedDocumentIds.includes(doc.id) && <Check size={13} />}
+                    <X size={13} />
                   </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setShowDocPicker(false)}
-                  className="mt-1 w-full border-t border-zinc-100 dark:border-zinc-800 px-3 py-1.5 text-left text-xs text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                >
-                  Done
-                </button>
+                </div>
+                <div className="max-h-56 overflow-y-auto py-1">
+                  {availableDocuments.map((doc) => (
+                    <button
+                      key={doc.id}
+                      type="button"
+                      onClick={() => {
+                        setScopedDocumentIds((prev) =>
+                          prev.includes(doc.id) ? prev.filter((x) => x !== doc.id) : [...prev, doc.id],
+                        );
+                      }}
+                      className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 ${
+                        scopedDocumentIds.includes(doc.id) ? 'text-brand-700 dark:text-brand-300' : 'text-zinc-700 dark:text-zinc-200'
+                      }`}
+                    >
+                      {doc.name}
+                      {scopedDocumentIds.includes(doc.id) && <Check size={13} />}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}

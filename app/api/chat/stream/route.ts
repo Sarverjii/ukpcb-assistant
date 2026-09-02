@@ -81,6 +81,10 @@ export async function POST(request: Request) {
   let isNewConversation = false;
   let question: string;
   let history: ChatTurn[];
+  // Only set on a fresh send (a brand-new USER row is created) — regenerate
+  // and edit both reuse an already-known, already-real message id on the
+  // client, so there's nothing new for the client to reconcile there.
+  let newUserMessageId: string | undefined;
 
   if (body.regenerateMessageId) {
     if (!conversationId) {
@@ -146,7 +150,8 @@ export async function POST(request: Request) {
         content: m.content,
       }));
     }
-    await appendMessage(conversationId, 'USER', question);
+    const newUserMessage = await appendMessage(conversationId, 'USER', question);
+    newUserMessageId = newUserMessage.id;
     if (isNewConversation) {
       await prisma.conversation.update({
         where: { id: conversationId },
@@ -181,6 +186,7 @@ export async function POST(request: Request) {
         send({
           type: 'done',
           messageId: assistantMessage.id,
+          userMessageId: newUserMessageId,
           conversationId: finalConversationId,
           citations,
           isNewConversation,

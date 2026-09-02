@@ -2,7 +2,17 @@ import type { Citation } from '@/components/chat/ChatPanel';
 
 export type StreamEvent =
   | { type: 'delta'; text: string }
-  | { type: 'done'; messageId: string; conversationId: string; citations: Citation[]; isNewConversation: boolean }
+  | {
+      type: 'done';
+      messageId: string;
+      // Only present on a fresh send — the id assigned to the just-created
+      // USER message, so the client can drop its local- placeholder id and
+      // make that message editable immediately, without needing a reload.
+      userMessageId?: string;
+      conversationId: string;
+      citations: Citation[];
+      isNewConversation: boolean;
+    }
   | { type: 'error'; message: string };
 
 /**
