@@ -1,6 +1,13 @@
 import { config } from '@/lib/config';
 import type { ChatTurn, GenerateAnswerParams, LLMProvider } from '@/lib/llm/types';
-import { buildCondensePrompt, buildUserTurn, extractCitedChunkIds, sanitizeCondensedQuestion } from '@/lib/llm/shared';
+import {
+  buildCondensePrompt,
+  buildGeneralKnowledgeFallbackPrompt,
+  buildUserTurn,
+  extractCitedChunkIds,
+  sanitizeCondensedQuestion,
+  sanitizeGeneralKnowledgeFallback,
+} from '@/lib/llm/shared';
 
 function buildMessages(params: GenerateAnswerParams) {
   const userTurn = buildUserTurn(params.contextChunks, params.question, params.documentInventory);
@@ -148,5 +155,32 @@ export class OllamaLLMProvider implements LLMProvider {
       throw new Error(`Ollama error: ${data.error ?? res.statusText}`);
     }
     return sanitizeCondensedQuestion(data.message?.content ?? '', question);
+  }
+
+  // See geminiProvider.ts's matching comment — lightweight, no retry; a
+  // failure here just means the caller keeps the bare document-gap
+  // fallback rather than getting a continuation.
+  async generalKnowledgeFallback(question: string): Promise<string | null> {
+    let res: Response;
+    try {
+      res = await fetch(`${config.OLLAMA_BASE_URL}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: config.OLLAMA_MODEL,
+          messages: [{ role: 'user', content: buildGeneralKnowledgeFallbackPrompt(question) }],
+          stream: false,
+          options: { temperature: 0 },
+        }),
+      });
+    } catch {
+      throw new Error(`Could not reach Ollama at ${config.OLLAMA_BASE_URL}. Is it running?`);
+    }
+
+    const data = (await res.json()) as OllamaChatResponse;
+    if (!res.ok || data.error) {
+      throw new Error(`Ollama error: ${data.error ?? res.statusText}`);
+    }
+    return sanitizeGeneralKnowledgeFallback(data.message?.content ?? '');
   }
 }

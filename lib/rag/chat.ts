@@ -9,9 +9,13 @@ import { matchDocumentsByName } from '@/lib/rag/documentNameMatch';
 import { getEmbeddingProvider } from '@/lib/embeddings';
 import { getLLMProvider } from '@/lib/llm';
 import { extractCitedChunkIds } from '@/lib/llm/shared';
-import { CHAT_SYSTEM_PROMPT, NO_AUTHORIZED_INFO_ANSWER } from '@/lib/llm/promptTemplates';
+import {
+  CHAT_SYSTEM_PROMPT,
+  NO_AUTHORIZED_INFO_ANSWER,
+  GENERAL_KNOWLEDGE_CONTINUATION_LABEL,
+} from '@/lib/llm/promptTemplates';
 import { logAuditEvent } from '@/lib/audit/log';
-import type { ChatTurn } from '@/lib/llm/types';
+import type { ChatTurn, LLMProvider } from '@/lib/llm/types';
 
 const SIMILARITY_THRESHOLD = 0.3;
 // Last N history messages fed to the query-condensing step (~3 exchanges)
@@ -242,6 +246,31 @@ async function logChatQueryAudit(
   });
 }
 
+/**
+ * Second layer of the class-B fallback (see CHAT_SYSTEM_PROMPT's rule B
+ * and its module comment): only runs when the main answer call came back
+ * as EXACTLY the bare NO_AUTHORIZED_INFO_ANSWER sentence — i.e. the main
+ * call's own attempt at this same continue-or-stop judgment didn't fire.
+ * Asking one call to juggle four-way classification, document-checking,
+ * AND this judgment all at once proved unreliable in real production
+ * testing; a second call with nothing else to do but this one decision is
+ * a substantially easier, more reliable task for the model. Failure here
+ * (thrown error, or the provider judging there's no real-world equivalent)
+ * just means the caller keeps the bare fallback — this is purely additive,
+ * never something that can make an answer worse than not calling it at all.
+ */
+async function tryGeneralKnowledgeFallback(llm: LLMProvider, question: string, text: string): Promise<string> {
+  if (text !== NO_AUTHORIZED_INFO_ANSWER) return text;
+  try {
+    const continuation = await llm.generalKnowledgeFallback(question);
+    if (!continuation) return text;
+    return `${text}\n\n${GENERAL_KNOWLEDGE_CONTINUATION_LABEL}\n\n${continuation}`;
+  } catch (err) {
+    console.error('[rag] generalKnowledgeFallback failed, keeping the bare document-gap answer', err);
+    return text;
+  }
+}
+
 export async function answerQuestion(
   ctx: AuthContext,
   conversationId: string,
@@ -257,7 +286,7 @@ export async function answerQuestion(
   );
 
   const llm = getLLMProvider();
-  const { text, citedChunkIds } = await llm.generateAnswer({
+  const { text: rawText, citedChunkIds } = await llm.generateAnswer({
     systemPrompt: CHAT_SYSTEM_PROMPT,
     contextChunks: relevant,
     conversationHistory,
@@ -265,7 +294,11 @@ export async function answerQuestion(
     documentInventory,
   });
 
+  // citedChunkIds/citations come from the main call only — a general-
+  // knowledge continuation (if any) never cites <context>, so this must be
+  // computed BEFORE the fallback potentially extends the text below.
   const citations = buildCitations(relevant, citedChunkIds);
+  const text = await tryGeneralKnowledgeFallback(llm, question, rawText);
   await logChatQueryAudit(ctx, conversationId, question, retrievalQuery, relevant, text, scopedDocumentIds);
 
   return { text, citations };
@@ -308,8 +341,25 @@ export async function* streamAnswer(
     yield delta;
   }
 
+  // citedChunkIds/citations come from the streamed text only — a general-
+  // knowledge continuation (if any, yielded below) never cites <context>,
+  // so this must be computed BEFORE the fallback potentially extends
+  // fullText.
   const citedChunkIds = extractCitedChunkIds(fullText, relevant);
   const citations = buildCitations(relevant, citedChunkIds);
+
+  // Not a token-streamed continuation — generalKnowledgeFallback (see
+  // tryGeneralKnowledgeFallback) is a single non-streaming completion, so
+  // it arrives as one more delta rather than trickling in like the main
+  // answer did. A brief pause before it appears is an acceptable tradeoff
+  // for how rarely this path fires (only once the main answer already
+  // came back as the bare document-gap fallback).
+  const extended = await tryGeneralKnowledgeFallback(llm, question, fullText);
+  if (extended !== fullText) {
+    yield extended.slice(fullText.length);
+    fullText = extended;
+  }
+
   // After the last yield — every token the client will see has already
   // been sent, so this await adds no perceived latency to the stream.
   await logChatQueryAudit(ctx, conversationId, question, retrievalQuery, relevant, fullText, scopedDocumentIds);

@@ -47,4 +47,16 @@ export interface LLMProvider {
   // generateAnswer does, since a condensing failure should just mean
   // "retrieve using the raw question" rather than blocking the turn.
   condenseQuestion(history: ChatTurn[], question: string): Promise<string>;
+
+  // Called ONLY after generateAnswer/generateAnswerStream already produced
+  // the bare NO_AUTHORIZED_INFO_ANSWER fallback (see lib/rag/chat.ts) — a
+  // second, narrowly-scoped judgment call: does this question have a real
+  // answer in the outside world, and if so, what is it? Returns null when
+  // it doesn't (a purely private company fact with no public equivalent —
+  // the caller keeps the bare refusal rather than risk a fabricated-
+  // looking answer), or the real answer text otherwise. A deliberately
+  // lightweight single-shot completion, same shape as condenseQuestion —
+  // not the full RAG-shaped generateAnswer path, since by construction
+  // there's no authorized document content relevant to this call at all.
+  generalKnowledgeFallback(question: string): Promise<string | null>;
 }

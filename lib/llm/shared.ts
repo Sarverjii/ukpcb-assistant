@@ -128,3 +128,53 @@ export function sanitizeCondensedQuestion(raw: string, original: string): string
   if (!text || text.length > 500) return original;
   return text;
 }
+
+// The literal signal generalKnowledgeFallback's prompt asks the model to
+// return when a question has no real-world equivalent — deliberately not
+// reused from anywhere else in this file, since this needs to be a value
+// that would never plausibly appear as the start of a genuine answer.
+const GENERAL_KNOWLEDGE_FALLBACK_NONE_SIGNAL = 'NONE';
+
+/**
+ * Shared by every LLMProvider's generalKnowledgeFallback() — a second,
+ * narrowly-scoped call made ONLY after the main answer call already
+ * produced the bare NO_AUTHORIZED_INFO_ANSWER fallback (see
+ * lib/rag/chat.ts). CHAT_SYSTEM_PROMPT already instructs the main call to
+ * make this same public-vs-private judgment and continue inline when
+ * appropriate — this exists because that one-shot combined judgment
+ * proved unreliable in practice (confirmed against real production
+ * failures, not assumed): asking one call to juggle four-way
+ * classification, document-checking, AND this fallback decision all at
+ * once meant the fallback branch often just didn't fire. A second call
+ * with nothing else to do but this one judgment is a substantially
+ * easier, more reliable task. Deliberately terse, single-shot, no system/
+ * user role separation to lean on — same shape as buildCondensePrompt.
+ */
+export function buildGeneralKnowledgeFallbackPrompt(question: string): string {
+  return `A question was asked that internal company documents don't answer: "${question}"
+
+Does this question have a real answer in the outside world — is it about a real company, product, technology, person, place, or public fact — as opposed to being a private, undocumented fact specific to one company (like an exact internal number, a confidential decision, or something that was simply never published anywhere)?
+
+If it does: answer it now, fully and specifically, using your own general knowledge. Give a genuinely complete, informative answer — several concrete sentences, not one thin line. Do not mention documents, companies' internal records, or the fact that this wasn't found anywhere; just answer the question on its own terms, the way any knowledgeable assistant would.
+
+If it does NOT — if answering would require inventing a specific private fact you have no real way of knowing — reply with exactly this one word and nothing else: ${GENERAL_KNOWLEDGE_FALLBACK_NONE_SIGNAL}
+
+Reply with ONLY the answer, or ONLY the word ${GENERAL_KNOWLEDGE_FALLBACK_NONE_SIGNAL} — no preamble, no labels, nothing else.`;
+}
+
+/**
+ * null means "no real-world equivalent — stay with the bare document-gap
+ * refusal", matching buildGeneralKnowledgeFallbackPrompt's NONE signal (or
+ * an empty/failed completion, treated the same way: silence here should
+ * never turn into a fabricated-looking answer). Never throws.
+ */
+export function sanitizeGeneralKnowledgeFallback(raw: string): string | null {
+  const text = raw.trim();
+  if (!text) return null;
+  // Model sometimes wraps the signal in punctuation/quotes/case variation
+  // ("None.", "'NONE'") despite the "ONLY that word" instruction — same
+  // defensive normalization spirit as sanitizeCondensedQuestion above.
+  const normalized = text.replace(/^["'.\s]+|["'.\s]+$/g, '');
+  if (normalized.toUpperCase() === GENERAL_KNOWLEDGE_FALLBACK_NONE_SIGNAL) return null;
+  return text;
+}

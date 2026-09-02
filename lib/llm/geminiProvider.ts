@@ -1,7 +1,14 @@
 import { GoogleGenAI } from '@google/genai';
 import { config } from '@/lib/config';
 import type { ChatTurn, GenerateAnswerParams, LLMProvider } from '@/lib/llm/types';
-import { buildCondensePrompt, buildUserTurn, extractCitedChunkIds, sanitizeCondensedQuestion } from '@/lib/llm/shared';
+import {
+  buildCondensePrompt,
+  buildGeneralKnowledgeFallbackPrompt,
+  buildUserTurn,
+  extractCitedChunkIds,
+  sanitizeCondensedQuestion,
+  sanitizeGeneralKnowledgeFallback,
+} from '@/lib/llm/shared';
 
 // Free-tier Google Gemini — genuinely $0 (Google's free tier, not a trial
 // credit that expires) and, unlike the local Ollama provider, a plain
@@ -207,5 +214,19 @@ export class GeminiLLMProvider implements LLMProvider {
       config: { temperature: 0 },
     });
     return sanitizeCondensedQuestion(response.text ?? '', question);
+  }
+
+  // Same "lightweight, no retry" reasoning as condenseQuestion above — this
+  // only ever runs after the main answer call already returned the bare
+  // fallback (see lib/rag/chat.ts), so a failure here just means the caller
+  // keeps that bare fallback rather than getting a continuation; not worth
+  // a second retry layer for a purely additive enhancement.
+  async generalKnowledgeFallback(question: string): Promise<string | null> {
+    const response = await getClient().models.generateContent({
+      model: config.GEMINI_MODEL,
+      contents: [{ role: 'user', parts: [{ text: buildGeneralKnowledgeFallbackPrompt(question) }] }],
+      config: { temperature: 0 },
+    });
+    return sanitizeGeneralKnowledgeFallback(response.text ?? '');
   }
 }

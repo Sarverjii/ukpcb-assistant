@@ -1,7 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { config } from '@/lib/config';
 import type { ChatTurn, GenerateAnswerParams, LLMProvider } from '@/lib/llm/types';
-import { buildCondensePrompt, buildUserTurn, extractCitedChunkIds, sanitizeCondensedQuestion } from '@/lib/llm/shared';
+import {
+  buildCondensePrompt,
+  buildGeneralKnowledgeFallbackPrompt,
+  buildUserTurn,
+  extractCitedChunkIds,
+  sanitizeCondensedQuestion,
+  sanitizeGeneralKnowledgeFallback,
+} from '@/lib/llm/shared';
 
 function buildMessages(params: GenerateAnswerParams): Anthropic.MessageParam[] {
   const userTurn = buildUserTurn(params.contextChunks, params.question, params.documentInventory);
@@ -116,6 +123,27 @@ export class AnthropicLLMProvider implements LLMProvider {
         .map((b) => b.text)
         .join('');
       return sanitizeCondensedQuestion(text, question);
+    } catch (err) {
+      throw mapAnthropicError(err);
+    }
+  }
+
+  // See geminiProvider.ts's matching comment — lightweight, no retry; a
+  // failure here just means the caller keeps the bare document-gap
+  // fallback rather than getting a continuation.
+  async generalKnowledgeFallback(question: string): Promise<string | null> {
+    try {
+      const response = await getClient().messages.create({
+        model: config.ANTHROPIC_MODEL,
+        max_tokens: 600,
+        temperature: 0,
+        messages: [{ role: 'user', content: buildGeneralKnowledgeFallbackPrompt(question) }],
+      });
+      const text = response.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('');
+      return sanitizeGeneralKnowledgeFallback(text);
     } catch (err) {
       throw mapAnthropicError(err);
     }
