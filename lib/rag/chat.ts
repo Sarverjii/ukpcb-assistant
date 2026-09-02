@@ -198,11 +198,18 @@ async function retrieveContext(
  * answerQuestion/streamAnswer, after the model's answer text is already
  * known (see retrieveContext's doc comment for why this moved out of
  * there). `gotNoAuthorizedInfoAnswer` is what Feature 4's gap-tracking
- * filters on: an exact match against the fixed fallback string the model
- * is instructed to return verbatim when it can't answer from authorized
- * content (see NO_AUTHORIZED_INFO_ANSWER's own doc comment) — a real
- * signal that this question hit a genuine content gap, not a guess from
- * retrieval stats alone.
+ * filters on: a real signal that this question hit a genuine content gap,
+ * not a guess from retrieval stats alone.
+ *
+ * Checked with startsWith, not ===: NO_AUTHORIZED_INFO_ANSWER is always
+ * the literal first sentence of a class-B-fallback answer (see
+ * CHAT_SYSTEM_PROMPT's rule B), but the model may now continue past it
+ * into a labeled general-knowledge answer for the same question when the
+ * topic genuinely has a real-world equivalent. The document gap is real
+ * either way — an admin should still see it flagged even when the user
+ * also got a helpful general-knowledge answer for their immediate
+ * question — so this only needs to detect that the fallback sentence
+ * opened the answer, not that it was the whole answer.
  */
 async function logChatQueryAudit(
   ctx: AuthContext,
@@ -213,7 +220,7 @@ async function logChatQueryAudit(
   answerText: string,
   scopedDocumentIds?: string[],
 ): Promise<void> {
-  const gotNoAuthorizedInfoAnswer = answerText === NO_AUTHORIZED_INFO_ANSWER;
+  const gotNoAuthorizedInfoAnswer = answerText.startsWith(NO_AUTHORIZED_INFO_ANSWER);
   await logAuditEvent({
     action: 'CHAT_QUERY',
     result: 'SUCCESS',
