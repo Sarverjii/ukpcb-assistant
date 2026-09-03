@@ -21,9 +21,29 @@
  */
 export type EmbeddingTaskType = 'RETRIEVAL_DOCUMENT' | 'RETRIEVAL_QUERY';
 
+// Matches Prisma's AIProviderKind, but this package deliberately doesn't
+// import from @prisma/client — kept as a plain string union so this file
+// has no dependency on the generated client at all.
+export type EmbeddingProviderKind = 'GEMINI' | 'OPENAI' | 'OLLAMA';
+
 export interface EmbeddingProvider {
   /** Vector dimensionality this provider produces — must match the
    *  `vector(N)` column in prisma/schema.prisma and EMBEDDING_DIMENSIONS. */
   readonly dimensions: number;
+  // Which provider/model actually produced a chunk's vector — stamped onto
+  // every DocumentChunk at insert/re-embed time (see
+  // lib/db/queries/chunks.ts's embeddingProvider/embeddingModel columns).
+  // A real production incident is why this exists: switching the active
+  // embedding provider does NOT retroactively re-embed already-indexed
+  // chunks, and two different embedding models produce vectors in
+  // genuinely different semantic spaces even at the same dimensionality —
+  // comparing them with cosine similarity doesn't error, it just returns
+  // near-random results. Confirmed directly: a chunk containing the exact
+  // answer to a real query ranked 838th of 898 by similarity after a
+  // provider switch, with the top "match" at a symmetry-breaking-noise
+  // 0.15 cosine similarity. Without this fingerprint there was no way to
+  // even detect that a chunk's embedding was stale, let alone fix it.
+  readonly provider: EmbeddingProviderKind;
+  readonly model: string;
   embed(texts: string[], taskType?: EmbeddingTaskType): Promise<number[][]>;
 }

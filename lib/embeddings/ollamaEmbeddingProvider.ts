@@ -41,8 +41,9 @@ function chunkArray<T>(items: T[], size: number): T[][] {
 
 export class OllamaEmbeddingProvider implements EmbeddingProvider {
   readonly dimensions = config.EMBEDDING_DIMENSIONS;
+  readonly provider = 'OLLAMA' as const;
+  readonly model: string;
   private readonly baseUrl: string;
-  private readonly model: string;
 
   constructor(options: { baseUrl: string; model: string }) {
     this.baseUrl = options.baseUrl;

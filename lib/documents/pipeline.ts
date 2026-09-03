@@ -61,6 +61,8 @@ export async function processDocument(documentId: string): Promise<void> {
       vectors,
       doc.clearanceLevel,
       doc.departments.map((d) => d.id),
+      embedder.provider,
+      embedder.model,
     );
 
     // A native PDF already IS the viewable file (fileKey) — nothing to

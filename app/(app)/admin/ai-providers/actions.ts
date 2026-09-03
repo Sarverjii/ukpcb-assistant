@@ -12,10 +12,13 @@ import {
   getDecryptedCredentialForRefresh,
 } from '@/lib/db/queries/aiProviders';
 import { listModelsForProvider, type DiscoveredModel } from '@/lib/ai/modelDiscovery';
+import { getEmbeddingProvider } from '@/lib/embeddings';
+import { countStaleEmbeddings, listStaleChunkBatch, updateChunkEmbeddings } from '@/lib/db/queries/chunks';
 import type { AICapability, AIProviderKind } from '@prisma/client';
 
 export type ActionResult = { error?: string };
 export type FetchModelsResult = { models?: DiscoveredModel[]; error?: string };
+export type ReembedBatchResult = { remaining: number; processed: number; error?: string };
 
 /**
  * Lists a provider's REAL, currently-available models using whatever
@@ -173,4 +176,78 @@ export async function deactivateProviderAction(capability: AICapability): Promis
   revalidatePath('/admin/ai-providers');
   revalidatePath('/chat');
   return {};
+}
+
+/**
+ * Re-embeds one bounded batch of "stale" chunks — those whose stored
+ * vector was produced by something other than the currently active
+ * embedding provider/model (including every chunk indexed before that was
+ * even tracked). See EmbeddingProvider's own comment for why this exists:
+ * switching the active embedding provider does not retroactively fix
+ * already-indexed chunks, and comparing vectors from two different
+ * embedding spaces with cosine similarity silently returns near-random
+ * results instead of erroring — a real incident, not a hypothetical one.
+ *
+ * Bounded rather than "re-embed everything in one call" because this
+ * shares the same maxDuration as every other admin action (see
+ * app/(app)/knowledge-base/page.tsx's comment on why replaceDocumentAction
+ * needs the same treatment) — the client calls this repeatedly, each
+ * round processing another batch, until `remaining` reaches 0. Re-auth is
+ * required only on the FIRST call (password passed) — this is a bulk,
+ * non-destructive, easily-repeatable maintenance action once authorized,
+ * not a fresh "great concern" action every single batch; the client never
+ * re-prompts mid-run.
+ */
+export async function reembedStaleChunksBatchAction(password?: string): Promise<ReembedBatchResult> {
+  const ctx = await getAuthContext();
+  await requireAdmin(ctx);
+
+  if (password !== undefined) {
+    try {
+      await requireAdminReauth(ctx, password, 'aiProviders:reembed');
+    } catch (err) {
+      if (err instanceof ForbiddenError) return { remaining: 0, processed: 0, error: err.message };
+      throw err;
+    }
+  }
+
+  let embedder;
+  try {
+    embedder = await getEmbeddingProvider();
+  } catch (err) {
+    return { remaining: 0, processed: 0, error: err instanceof Error ? err.message : 'No embedding provider is active.' };
+  }
+
+  const BATCH_SIZE = 40;
+  const stale = await listStaleChunkBatch(embedder.provider, embedder.model, BATCH_SIZE);
+
+  if (stale.length > 0) {
+    let vectors: number[][];
+    try {
+      vectors = await embedder.embed(
+        stale.map((c) => c.content),
+        'RETRIEVAL_DOCUMENT',
+      );
+    } catch (err) {
+      return { remaining: -1, processed: 0, error: err instanceof Error ? err.message : 'Embedding call failed.' };
+    }
+    await updateChunkEmbeddings(
+      stale.map((c, i) => ({ id: c.id, embedding: vectors[i], provider: embedder.provider, model: embedder.model })),
+    );
+  }
+
+  const remaining = await countStaleEmbeddings(embedder.provider, embedder.model);
+
+  if (stale.length > 0) {
+    await logAuditEvent({
+      action: 'DOCUMENTS_REEMBEDDED',
+      result: 'SUCCESS',
+      userId: ctx.userId,
+      resource: 'bulk',
+      metadata: { batchSize: stale.length, remaining, provider: embedder.provider, model: embedder.model },
+    });
+  }
+  if (remaining === 0) revalidatePath('/admin/ai-providers');
+
+  return { remaining, processed: stale.length };
 }

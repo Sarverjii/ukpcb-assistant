@@ -8,6 +8,7 @@ import {
   deactivateProviderAction,
   fetchModelsAction,
   refreshModelsAction,
+  reembedStaleChunksBatchAction,
 } from '@/app/(app)/admin/ai-providers/actions';
 import { findPricingForModel, OLLAMA_PRICING, PRICING_LAST_VERIFIED, type PricingEntry } from '@/lib/ai/pricing';
 import type { DiscoveredModel } from '@/lib/ai/modelDiscovery';
@@ -54,17 +55,50 @@ export function AIProviderSection({
   title,
   description,
   providers,
+  staleEmbeddingCount = 0,
 }: {
   capability: AICapability;
   title: string;
   description: string;
   providers: ProviderRow[];
+  // EMBEDDING only — how many chunks were embedded with something other
+  // than the currently active provider/model, per
+  // lib/db/queries/chunks.ts::countStaleEmbeddings. See
+  // EmbeddingProvider's own comment for why this matters: those chunks'
+  // vectors live in a different semantic space than a query embedded
+  // right now, so retrieval against them is close to random.
+  staleEmbeddingCount?: number;
 }) {
   const active = providers.find((p) => p.isActive) ?? null;
   const [changing, setChanging] = useState(false);
   const [pending, startTransition] = useTransition();
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
+  const [staleCount, setStaleCount] = useState(staleEmbeddingCount);
+  const [reembedProgress, setReembedProgress] = useState<{ done: number; error?: string } | null>(null);
+  const [showReembedReauth, setShowReembedReauth] = useState(false);
+  const [reembedding, setReembedding] = useState(false);
+
+  async function runReembedLoop(password?: string) {
+    setReembedding(true);
+    setReembedProgress({ done: 0 });
+    let done = 0;
+    let firstCall = true;
+    for (;;) {
+      const result = await reembedStaleChunksBatchAction(firstCall ? password : undefined);
+      firstCall = false;
+      if (result.error) {
+        setReembedProgress({ done, error: result.error });
+        setReembedding(false);
+        return;
+      }
+      done += result.processed;
+      setStaleCount(result.remaining);
+      setReembedProgress({ done });
+      if (result.remaining <= 0 || result.processed === 0) break;
+    }
+    setReembedding(false);
+  }
 
   function handleDeactivate() {
     startTransition(async () => {
@@ -138,6 +172,33 @@ export function AIProviderSection({
               <ShieldAlert size={13} /> Re-verification failed: {refreshError} — this provider may have stopped working.
             </p>
           )}
+          {capability === 'EMBEDDING' && staleCount > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3 py-2">
+              <p className="flex items-center gap-1.5 text-xs text-amber-800 dark:text-amber-300">
+                <ShieldAlert size={13} className="shrink-0" />
+                {staleCount} chunk{staleCount === 1 ? '' : 's'} were embedded with a different model — retrieval
+                for {staleCount === 1 ? 'it' : 'them'} is degraded until re-embedded.
+              </p>
+              <button
+                type="button"
+                disabled={reembedding}
+                onClick={() => setShowReembedReauth(true)}
+                className="flex shrink-0 items-center gap-1.5 rounded-md border border-amber-300 dark:border-amber-800 bg-white dark:bg-zinc-900 px-2.5 py-1 text-xs font-medium text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900 disabled:opacity-60"
+              >
+                {reembedding ? <Loader2 size={13} className="animate-spin" /> : null}
+                {reembedding ? 'Re-embedding…' : 'Re-embed now'}
+              </button>
+            </div>
+          )}
+          {reembedProgress && (
+            <p className="text-xs text-zinc-500">
+              {reembedProgress.error
+                ? `Re-embedding stopped after ${reembedProgress.done}: ${reembedProgress.error}`
+                : reembedding
+                  ? `Re-embedded ${reembedProgress.done} so far…`
+                  : `Done — re-embedded ${reembedProgress.done} chunk${reembedProgress.done === 1 ? '' : 's'}.`}
+            </p>
+          )}
         </div>
       ) : (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 dark:border-red-900 bg-red-50/50 dark:bg-red-950/30 p-4">
@@ -159,6 +220,19 @@ export function AIProviderSection({
           capability={capability}
           providers={providers}
           onDone={() => setChanging(false)}
+        />
+      )}
+
+      {showReembedReauth && (
+        <ReauthDialog
+          title="Re-embed stale chunks"
+          description={`Recomputes ${staleCount} chunk${staleCount === 1 ? '' : 's'}' vectors with the currently active embedding model, in bounded batches — this can take a while for a large backlog. Nothing else about the documents changes.`}
+          confirmLabel="Start"
+          onConfirm={async (password) => {
+            runReembedLoop(password);
+            return {};
+          }}
+          onClose={() => setShowReembedReauth(false)}
         />
       )}
     </section>

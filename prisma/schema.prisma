@@ -330,6 +330,20 @@ model DocumentChunk {
   // see lib/db/queries/chunks.ts.
   departmentIds String[] @default([])
 
+  // Which embedding provider/model actually produced this row's vector —
+  // stamped at insert/re-embed time from the active EmbeddingProvider (see
+  // that interface's own comment for the real incident this exists to
+  // prevent). Null on any chunk indexed before this column existed —
+  // deliberately NOT backfilled with a guess, since the whole point is to
+  // distinguish "known to match the active provider" from "unknown/
+  // possibly stale"; a null here is treated as stale by definition.
+  // Compared against AIProviderCredential's active EMBEDDING row (never
+  // trusted as a foreign key — a provider can be reconfigured, and old
+  // chunks should still remember what actually embedded them) to detect
+  // drift and drive the "re-embed" admin action.
+  embeddingProvider AIProviderKind?
+  embeddingModel    String?
+
   // 1-based PDF page number or PPTX slide number this chunk's text was
   // extracted from — null for DOCX/TXT/MD, which have no fixed pagination
   // in the source file itself (a DOCX's page breaks are a function of the

@@ -32,8 +32,9 @@ function chunkArray<T>(items: T[], size: number): T[][] {
 
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   readonly dimensions = config.EMBEDDING_DIMENSIONS;
+  readonly provider = 'OPENAI' as const;
+  readonly model: string;
   private readonly apiKey: string;
-  private readonly model: string;
 
   constructor(options: { apiKey: string; model: string }) {
     this.apiKey = options.apiKey;

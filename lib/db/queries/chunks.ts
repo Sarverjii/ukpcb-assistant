@@ -209,6 +209,12 @@ export async function insertDocumentChunks(
   embeddings: number[][],
   clearanceLevel: number,
   departmentIds: string[] = [],
+  // Which provider/model actually produced `embeddings` — see
+  // EmbeddingProvider's own comment for why this is tracked. Optional only
+  // so existing call sites keep compiling; every real caller should pass
+  // it (lib/documents/pipeline.ts does).
+  embeddingProvider?: 'ANTHROPIC' | 'GEMINI' | 'OPENAI' | 'OLLAMA',
+  embeddingModel?: string,
 ): Promise<void> {
   if (chunks.length !== embeddings.length) {
     throw new Error('chunks and embeddings length mismatch');
@@ -219,9 +225,9 @@ export async function insertDocumentChunks(
       const vec = toSql(embeddings[i]);
       return prisma.$executeRaw`
         INSERT INTO "DocumentChunk"
-          (id, "documentId", "chunkIndex", content, embedding, "clearanceRank", "departmentIds", "pageNumber", "createdAt")
+          (id, "documentId", "chunkIndex", content, embedding, "clearanceRank", "departmentIds", "pageNumber", "embeddingProvider", "embeddingModel", "createdAt")
         VALUES
-          (gen_random_uuid()::text, ${documentId}, ${chunk.index}, ${chunk.content}, ${vec}::vector, ${clearanceLevel}, ${departmentIds}::text[], ${chunk.pageNumber ?? null}, now())
+          (gen_random_uuid()::text, ${documentId}, ${chunk.index}, ${chunk.content}, ${vec}::vector, ${clearanceLevel}, ${departmentIds}::text[], ${chunk.pageNumber ?? null}, ${embeddingProvider ?? null}::"AIProviderKind", ${embeddingModel ?? null}, now())
       `;
     }),
     // Prisma's default interactive-transaction timeout is 5000ms, covering
@@ -273,4 +279,67 @@ export function updateChunksDepartmentsForDocument(documentId: string, departmen
     where: { documentId },
     data: { departmentIds },
   });
+}
+
+/**
+ * How many chunks were embedded with something OTHER than the currently
+ * active embedding provider/model — including every chunk indexed before
+ * this tracking existed (embeddingProvider IS NULL). These are the chunks
+ * whose vectors live in a different semantic space than a query embedded
+ * right now, so similarity search against them is closer to random than
+ * relevant (see EmbeddingProvider's own comment for the real incident this
+ * measures). Surfaced as a banner + count on the admin side so staleness
+ * is visible before someone notices via a wrong "not enough information"
+ * chat answer, the way it was first discovered here.
+ */
+export async function countStaleEmbeddings(activeProvider: string, activeModel: string): Promise<number> {
+  return prisma.documentChunk.count({
+    where: {
+      OR: [{ embeddingProvider: null }, { embeddingProvider: { not: activeProvider as never } }, { embeddingModel: { not: activeModel } }],
+    },
+  });
+}
+
+export type StaleChunk = { id: string; content: string };
+
+/**
+ * One bounded batch of stale chunk ids/content to re-embed — bounded
+ * rather than "all of them" because re-embedding calls a real external API
+ * per batch and this app's admin actions share the same maxDuration as
+ * every other route (see app/(app)/knowledge-base/page.tsx's own comment);
+ * the calling action re-invokes this repeatedly until it returns fewer
+ * than `limit` rows, each round re-authenticated by nothing further since
+ * the whole operation was already authorized once at the start (see
+ * reembedStaleChunksAction's own comment).
+ */
+export function listStaleChunkBatch(activeProvider: string, activeModel: string, limit: number): Promise<StaleChunk[]> {
+  return prisma.documentChunk.findMany({
+    where: {
+      OR: [{ embeddingProvider: null }, { embeddingProvider: { not: activeProvider as never } }, { embeddingModel: { not: activeModel } }],
+    },
+    select: { id: true, content: true },
+    take: limit,
+  });
+}
+
+/**
+ * Writes back freshly-computed vectors for a batch of chunks and stamps
+ * the provider/model that produced them, in one transaction per batch —
+ * mirrors insertDocumentChunks's own per-row $executeRaw pattern (Prisma
+ * can't express the vector column any other way).
+ */
+export async function updateChunkEmbeddings(
+  updates: { id: string; embedding: number[]; provider: string; model: string }[],
+): Promise<void> {
+  await prisma.$transaction(
+    updates.map(({ id, embedding, provider, model }) => {
+      const vec = toSql(embedding);
+      return prisma.$executeRaw`
+        UPDATE "DocumentChunk"
+        SET embedding = ${vec}::vector, "embeddingProvider" = ${provider}::"AIProviderKind", "embeddingModel" = ${model}
+        WHERE id = ${id}
+      `;
+    }),
+    { timeout: 45_000 },
+  );
 }

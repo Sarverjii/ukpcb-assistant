@@ -41,8 +41,9 @@ function chunkArray<T>(items: T[], size: number): T[][] {
 
 export class GeminiEmbeddingProvider implements EmbeddingProvider {
   readonly dimensions = config.EMBEDDING_DIMENSIONS;
+  readonly provider = 'GEMINI' as const;
+  readonly model: string;
   private readonly apiKey: string;
-  private readonly model: string;
   private client: GoogleGenAI | null = null;
 
   constructor(options: { apiKey: string; model: string }) {

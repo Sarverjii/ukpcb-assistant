@@ -1,5 +1,6 @@
 import { ShieldAlert } from 'lucide-react';
 import { listProviderCredentialsSummary, type ProviderCredentialSummary } from '@/lib/db/queries/aiProviders';
+import { countStaleEmbeddings } from '@/lib/db/queries/chunks';
 import { AIProviderSection } from '@/components/admin/AIProviderSection';
 import type { AICapability, AIProviderKind } from '@prisma/client';
 
@@ -38,6 +39,10 @@ export default async function AIProvidersPage() {
   const rows = await listProviderCredentialsSummary();
   const llmProviders = forCapability(rows, 'LLM', LLM_PROVIDERS);
   const embeddingProviders = forCapability(rows, 'EMBEDDING', EMBEDDING_PROVIDERS);
+  const activeEmbedding = embeddingProviders.find((p) => p.isActive);
+  const staleEmbeddingCount = activeEmbedding?.model
+    ? await countStaleEmbeddings(activeEmbedding.provider, activeEmbedding.model)
+    : 0;
   const missing = [
     !llmProviders.some((p) => p.isActive) && 'chat/query',
     !embeddingProviders.some((p) => p.isActive) && 'embedding',
@@ -76,8 +81,9 @@ export default async function AIProvidersPage() {
       <AIProviderSection
         capability="EMBEDDING"
         title="Embedding model"
-        description="Turns documents and questions into vectors for retrieval. Switching does NOT re-embed documents already indexed — existing retrieval quality may degrade until they're re-uploaded, so switch deliberately, not casually."
+        description="Turns documents and questions into vectors for retrieval. Switching does NOT automatically re-embed documents already indexed — two embedding models produce vectors in different spaces, so retrieval quality silently degrades for anything indexed under the old one until it's re-embedded (the button below does that in place, no re-upload needed)."
         providers={embeddingProviders}
+        staleEmbeddingCount={staleEmbeddingCount}
       />
     </div>
   );
