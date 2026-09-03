@@ -21,6 +21,7 @@ import {
 import { getStorageProvider } from '@/lib/documents/storage';
 import { SUPPORTED_MIME_TYPES } from '@/lib/documents/textExtraction';
 import { fetchUrlForIngestion, discoverSameDomainLinks, UrlFetchError } from '@/lib/documents/urlFetch';
+import { getLowestRole } from '@/lib/db/queries/roles';
 import { processDocument } from '@/lib/documents/pipeline';
 import { config } from '@/lib/config';
 
@@ -309,11 +310,10 @@ export type AddUrlResult = ActionResult & { pagesAdded?: number };
 async function saveFetchedPageAsDocument(
   page: { html: string; title: string | null; contentType: 'text/html' | 'text/plain' },
   url: string,
-  nameOverride: string,
   clearanceLevel: number,
   uploadedById: string,
 ): Promise<string> {
-  const name = nameOverride || page.title || url;
+  const name = page.title || url;
   const buffer = Buffer.from(page.html, 'utf-8');
   const storage = getStorageProvider();
   const extension = page.contentType === 'text/plain' ? '.txt' : '.html';
@@ -366,18 +366,18 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
   }
 
   const url = String(formData.get('url') ?? '').trim();
-  const nameOverride = String(formData.get('name') ?? '').trim();
-  const clearanceLevelRaw = formData.get('clearanceLevel');
   const crawl = formData.get('crawl') === 'true';
   if (!url) return { error: 'A URL is required.' };
-  const clearanceLevel = Number(clearanceLevelRaw);
-  if (!Number.isFinite(clearanceLevel)) return { error: 'Invalid clearance level.' };
-  // Same upload-time sanity check as a file upload (see the upload
-  // route's matching comment) — read access is enforced independently at
-  // query time regardless.
-  if (clearanceLevel > ctx.clearanceRank) {
-    return { error: 'You cannot assign a clearance level above your own.' };
-  }
+
+  // Per explicit request: URL-sourced content is public to every employee
+  // regardless of clearance, not just every department (departments is
+  // already left unset below for that half — see saveFetchedPageAsDocument's
+  // own comment). Using the lowest rank currently configured — rather than
+  // a hardcoded constant — means this keeps meaning "everyone" even if the
+  // hierarchy is later restructured (e.g. a new, even-lower role added).
+  const lowestRole = await getLowestRole();
+  if (!lowestRole) return { error: 'No roles are configured yet.' };
+  const clearanceLevel = lowestRole.hierarchyRank;
 
   let rootUrl: URL;
   try {
@@ -394,7 +394,7 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
     throw err;
   }
 
-  const documentIds = [await saveFetchedPageAsDocument(rootPage, url, nameOverride, clearanceLevel, ctx.userId)];
+  const documentIds = [await saveFetchedPageAsDocument(rootPage, url, clearanceLevel, ctx.userId)];
 
   // Crawl mode: same-domain pages linked FROM the root page, fetched and
   // added the same way, up to the cap above. A page that fails to fetch
@@ -406,7 +406,7 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
       if (documentIds.length >= MAX_CRAWL_PAGES) break;
       try {
         const linkedPage = await fetchUrlForIngestion(link);
-        documentIds.push(await saveFetchedPageAsDocument(linkedPage, link, '', clearanceLevel, ctx.userId));
+        documentIds.push(await saveFetchedPageAsDocument(linkedPage, link, clearanceLevel, ctx.userId));
       } catch (err) {
         console.warn('[documents] crawl skipped a page', link, err instanceof Error ? err.message : err);
       }

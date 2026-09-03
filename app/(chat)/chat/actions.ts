@@ -70,6 +70,9 @@ export type CitationPreviewResult =
       // native pagination is genuinely slides; every other format (PDF,
       // and DOCX/TXT/MD's generated preview) reads as pages.
       unit: 'page' | 'slide';
+      // Set only for a document added by pasting a URL — see
+      // ChunkForUser's own comment.
+      sourceUrl: string | null;
     }
   | { error: string };
 
@@ -107,6 +110,7 @@ export async function getCitationPreviewAction(chunkId: string): Promise<Citatio
     pageNumber: chunk.pageNumber,
     previewable: chunk.mimeType === 'application/pdf' || chunk.previewFileKey != null,
     unit: chunk.mimeType === PPTX_MIME ? 'slide' : 'page',
+    sourceUrl: chunk.sourceUrl,
   };
 }
 

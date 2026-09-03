@@ -5,6 +5,18 @@ export function listRolesByRankDesc() {
 }
 
 /**
+ * The role currently sitting at the very bottom of the hierarchy — used
+ * by addDocumentFromUrlAction to make URL-sourced content visible to
+ * literally everyone regardless of clearance (its rank is the one every
+ * other role's rank is guaranteed to be >= ). Kept as a live lookup
+ * rather than a hardcoded rank so it keeps meaning "everyone" even if
+ * the hierarchy is later restructured.
+ */
+export function getLowestRole() {
+  return prisma.role.findFirst({ orderBy: { hierarchyRank: 'asc' } });
+}
+
+/**
  * New roles start at the BOTTOM of the hierarchy (lowest clearance) — the
  * admin then uses moveRoleUp/moveRoleDown to shuffle it into position. This
  * keeps "add" and "reorder" as two simple, separately-understandable

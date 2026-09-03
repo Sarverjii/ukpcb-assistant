@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X, FileText, ExternalLink, Presentation } from 'lucide-react';
+import { X, FileText, Globe, ExternalLink, Presentation } from 'lucide-react';
 import { getCitationPreviewAction } from '@/app/(chat)/chat/actions';
 import { PdfPageViewer } from '@/components/chat/PdfPageViewer';
 
@@ -15,6 +15,7 @@ type PreviewState =
       pageNumber: number | null;
       previewable: boolean;
       unit: 'page' | 'slide';
+      sourceUrl: string | null;
     };
 
 // Modal (not an anchored popover) deliberately — a chip's on-screen position
@@ -55,6 +56,7 @@ export function CitationPreviewModal({
               pageNumber: result.pageNumber,
               previewable: result.previewable,
               unit: result.unit,
+              sourceUrl: result.sourceUrl,
             },
       );
     });
@@ -78,7 +80,23 @@ export function CitationPreviewModal({
   // the text passage instead, same as a genuinely unsupported format.
   const canRenderPage = state.status === 'ready' && state.previewable && state.pageNumber != null;
   const viewUrl = state.status === 'ready' ? `/api/documents/${state.documentId}/view` : null;
-  const openUrl = state.status === 'ready' && state.pageNumber ? `${viewUrl}#page=${state.pageNumber}` : viewUrl;
+  const internalOpenUrl = state.status === 'ready' && state.pageNumber ? `${viewUrl}#page=${state.pageNumber}` : viewUrl;
+  // A website-sourced citation opens the REAL live page, not the
+  // internally generated PDF rendition of its scraped HTML — that
+  // rendition exists so the passage can still be shown/highlighted here,
+  // but it's not what "open this" should mean for something that has an
+  // actual source URL. sourceUrl is only ever set for that kind of
+  // document (see ChunkForUser's own comment).
+  const sourceUrl = state.status === 'ready' ? state.sourceUrl : null;
+  const openUrl = sourceUrl ?? internalOpenUrl;
+  let sourceHostname: string | null = null;
+  if (sourceUrl) {
+    try {
+      sourceHostname = new URL(sourceUrl).hostname;
+    } catch {
+      sourceHostname = null;
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-[2px]" onClick={onClose}>
@@ -91,14 +109,19 @@ export function CitationPreviewModal({
         <div className="flex items-center justify-between gap-3 border-b border-zinc-100 dark:border-zinc-800 px-5 py-3.5">
           <div className="flex min-w-0 items-center gap-2.5">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
-              <FileText size={14} />
+              {sourceUrl ? <Globe size={14} /> : <FileText size={14} />}
             </span>
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{documentName}</p>
-              {state.status === 'ready' && state.pageNumber && (
-                <p className="text-xs text-zinc-400">
-                  {state.unit === 'slide' ? `Slide ${state.pageNumber}` : `Page ${state.pageNumber}`}
-                </p>
+              {sourceHostname ? (
+                <p className="truncate text-xs text-zinc-400">{sourceHostname}</p>
+              ) : (
+                state.status === 'ready' &&
+                state.pageNumber && (
+                  <p className="text-xs text-zinc-400">
+                    {state.unit === 'slide' ? `Slide ${state.pageNumber}` : `Page ${state.pageNumber}`}
+                  </p>
+                )
               )}
             </div>
           </div>
@@ -110,7 +133,7 @@ export function CitationPreviewModal({
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-brand-600 dark:text-brand-400 hover:bg-brand-50 dark:hover:bg-brand-950"
               >
-                Open full document
+                {sourceUrl ? 'View live page' : 'Open full document'}
                 <ExternalLink size={12} />
               </a>
             )}
@@ -164,11 +187,22 @@ export function CitationPreviewModal({
               <p className="whitespace-pre-wrap">{state.content}</p>
             </div>
             <div className="flex items-start gap-2 border-t border-zinc-100 dark:border-zinc-800 px-5 py-2.5 text-xs text-zinc-400">
-              <Presentation size={13} className="mt-0.5 shrink-0" />
+              {sourceUrl ? <Globe size={13} className="mt-0.5 shrink-0" /> : <Presentation size={13} className="mt-0.5 shrink-0" />}
               <span>
-                This is the exact passage the answer was drawn from, re-checked against your current
-                access. A page preview isn&apos;t available for this particular citation — use{' '}
-                <span className="font-medium">Open full document</span> to see it in context.
+                {sourceUrl ? (
+                  <>
+                    This is the exact passage the answer was drawn from, re-checked against your
+                    current access. Use <span className="font-medium">View live page</span> to see
+                    it on the actual site — the page may have changed since this was indexed.
+                  </>
+                ) : (
+                  <>
+                    This is the exact passage the answer was drawn from, re-checked against your
+                    current access. A page preview isn&apos;t available for this particular
+                    citation — use <span className="font-medium">Open full document</span> to see
+                    it in context.
+                  </>
+                )}
               </span>
             </div>
           </>

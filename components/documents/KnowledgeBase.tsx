@@ -74,7 +74,7 @@ export function KnowledgeBase({
           />
         </div>
         <div className="mt-3">
-          <UrlUploadForm roles={roles} />
+          <UrlUploadForm />
         </div>
       </section>
 

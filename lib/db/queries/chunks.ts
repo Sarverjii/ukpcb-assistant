@@ -114,6 +114,12 @@ export type ChunkForUser = {
   // see previewFileKey's schema doc comment). This is what the citation
   // preview actually renders when the original isn't already a PDF.
   previewFileKey: string | null;
+  // Set only for a document added by pasting a URL — see
+  // Document.sourceUrl's own comment. Lets the citation preview link
+  // straight to the real live page instead of an internally generated
+  // PDF rendition of the scraped HTML, which is what "Open full document"
+  // would otherwise show for this kind of source.
+  sourceUrl: string | null;
 };
 
 export async function getChunkForUser(
@@ -125,7 +131,7 @@ export async function getChunkForUser(
   const rows = await prisma.$queryRaw<ChunkForUser[]>`
     SELECT dc.id, dc.content, dc."documentId" AS "documentId", d.name AS "documentName",
            dc."pageNumber" AS "pageNumber", d."mimeType" AS "mimeType",
-           d."previewFileKey" AS "previewFileKey"
+           d."previewFileKey" AS "previewFileKey", d."sourceUrl" AS "sourceUrl"
     FROM "DocumentChunk" dc
     JOIN "Document" d ON d.id = dc."documentId"
     WHERE dc.id = ${chunkId}
