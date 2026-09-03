@@ -8,6 +8,13 @@ export type RetrievedChunk = {
   documentName: string;
   clearanceLevel: number;
   similarity: number;
+  // Set only for a document added by pasting a URL — see
+  // Document.sourceUrl's own comment. Carried all the way through to
+  // lib/rag/chat.ts::buildCitations so a citation chip for website-sourced
+  // content can link straight to the real live page instead of opening
+  // the citation-preview modal (which has nothing useful to show for a
+  // page that was never rendered into an internal PDF).
+  sourceUrl: string | null;
   // Set by lib/rag/chat.ts after merging in retrieveChunksForDocuments()
   // results — never set by this query itself. Lets a chunk the question
   // named its source document for skip the SIMILARITY_THRESHOLD cutoff even
@@ -71,6 +78,7 @@ export async function retrieveAuthorizedChunks(
       dc."documentId" AS "documentId",
       d.name AS "documentName",
       d."clearanceLevel" AS "clearanceLevel",
+      d."sourceUrl" AS "sourceUrl",
       1 - (dc.embedding <=> ${vec}::vector) AS similarity
     FROM "DocumentChunk" dc
     JOIN "Document" d ON d.id = dc."documentId"
@@ -173,13 +181,14 @@ export async function retrieveChunksForDocuments(
   const vec = toSql(queryEmbedding);
 
   const rows = await prisma.$queryRaw<RetrievedChunk[]>`
-    SELECT id, content, "documentId", "documentName", "clearanceLevel", similarity FROM (
+    SELECT id, content, "documentId", "documentName", "clearanceLevel", "sourceUrl", similarity FROM (
       SELECT
         dc.id,
         dc.content,
         dc."documentId" AS "documentId",
         d.name AS "documentName",
         d."clearanceLevel" AS "clearanceLevel",
+        d."sourceUrl" AS "sourceUrl",
         1 - (dc.embedding <=> ${vec}::vector) AS similarity,
         ROW_NUMBER() OVER (
           PARTITION BY dc."documentId"

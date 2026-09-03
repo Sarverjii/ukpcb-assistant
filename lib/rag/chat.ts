@@ -24,18 +24,46 @@ const SIMILARITY_THRESHOLD = 0.3;
 // growing with the whole conversation. Retrieval quality on a follow-up
 // depends on the last couple of turns' topic, not the full transcript.
 const MAX_CONDENSE_HISTORY_MESSAGES = 6;
-// Was 6 — too small for the corpus this now actually holds (35 documents,
-// 353 chunks). Confirmed directly: for "how many projects have we worked
-// on", the one chunk that actually answers it (a stats overview — "500+
-// clients", "450+ Websites developed") scored 0.3363, comfortably above
-// SIMILARITY_THRESHOLD, but ranked #17 — so LIMIT 6 discarded it before the
-// threshold filter ever got to see it. Raising this doesn't loosen what
-// counts as "relevant" (SIMILARITY_THRESHOLD still does that job); it just
-// stops truncating the candidate pool before a real match can reach it.
-// 20 chunks of ~1000 chars is a small fraction of Gemini's context window.
-const TOP_K = 20;
+// Was 6, then 20 — both too small for the corpus this now actually holds.
+// 20 was set when the corpus was 35 documents / 353 chunks (see the case
+// that motivated it, below). The corpus has since grown to 89 documents /
+// 1012 chunks (mainly from website crawling), and the same failure mode
+// recurred: "Who is Sukhminder Kaur at Evon" — asked after her name and
+// title were ingested verbatim from a real page
+// (embeddedsystems.evontech.com/firmware-development-services/) — scored
+// 0.688 similarity, comfortably above SIMILARITY_THRESHOLD, but ranked
+// #82 of 1012, so LIMIT 20 discarded it before the threshold filter ever
+// saw it (confirmed directly against the production DB and embedding
+// provider, not guessed). A marketing site's per-page bio/consultant
+// blurbs are numerous and semantically similar to each other, so a
+// genuinely-matching chunk can rank surprisingly far down even when nothing
+// is wrong with its embedding.
+//
+// The original case this constant was raised for: for "how many projects
+// have we worked on", the one chunk that actually answers it (a stats
+// overview — "500+ clients", "450+ Websites developed") scored 0.3363,
+// but ranked #17 — so the old LIMIT 6 discarded it before the threshold
+// filter ever got to see it.
+//
+// Raising this doesn't loosen what counts as "relevant" (SIMILARITY_THRESHOLD
+// still does that job); it just stops truncating the candidate pool before
+// a real match can reach it. 100 chunks of ~1000 chars (~25K tokens) is
+// still a small fraction of Gemini's context window, and this constant has
+// now needed raising twice as the same website-ingestion feature grew the
+// corpus — expect to revisit it again as more sites get crawled.
+const TOP_K = 100;
 
-export type Citation = { documentId: string; documentName: string; chunkId: string };
+export type Citation = {
+  documentId: string;
+  documentName: string;
+  chunkId: string;
+  // Set only for a citation whose source chunk came from a pasted URL —
+  // see Document.sourceUrl's own comment. Lets the citation chip in chat
+  // link straight to the real live page (opened in a new tab) instead of
+  // going through the citation-preview modal, which has nothing useful to
+  // show for a page that was never rendered into an internal PDF.
+  sourceUrl: string | null;
+};
 
 export type AnswerResult = { text: string; citations: Citation[] };
 
@@ -419,7 +447,7 @@ function buildCitations(relevant: RetrievedChunk[], citedChunkIds: string[]): Ci
   for (const c of cited) {
     if (seen.has(c.documentId)) continue;
     seen.add(c.documentId);
-    deduped.push({ documentId: c.documentId, documentName: c.documentName, chunkId: c.id });
+    deduped.push({ documentId: c.documentId, documentName: c.documentName, chunkId: c.id, sourceUrl: c.sourceUrl });
   }
   return deduped;
 }

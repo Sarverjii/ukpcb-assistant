@@ -1,5 +1,6 @@
 'use client';
 
+import { ExternalLink } from 'lucide-react';
 import { Markdown } from '@/components/chat/Markdown';
 import { useCitationPreview, type Citation } from '@/components/chat/CitationPreviewContext';
 
@@ -54,17 +55,31 @@ export function ReadOnlyConversationTranscript({
               </div>
               {m.citations && m.citations.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
-                  {m.citations.map((c) => (
-                    <button
-                      key={c.chunkId}
-                      type="button"
-                      onClick={() => openCitation(c)}
-                      title={`Preview cited passage from ${c.documentName}`}
-                      className="rounded-full border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-2.5 py-0.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
-                    >
-                      {c.documentName}
-                    </button>
-                  ))}
+                  {m.citations.map((c) =>
+                    c.sourceUrl ? (
+                      <a
+                        key={c.chunkId}
+                        href={c.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={`Open ${c.documentName} in a new tab`}
+                        className="flex items-center gap-1 rounded-full border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-2.5 py-0.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
+                      >
+                        {c.documentName}
+                        <ExternalLink size={10} className="shrink-0" />
+                      </a>
+                    ) : (
+                      <button
+                        key={c.chunkId}
+                        type="button"
+                        onClick={() => openCitation(c)}
+                        title={`Preview cited passage from ${c.documentName}`}
+                        className="rounded-full border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-2.5 py-0.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
+                      >
+                        {c.documentName}
+                      </button>
+                    ),
+                  )}
                 </div>
               )}
             </div>

@@ -3,7 +3,17 @@
 import { createContext, useContext, useState } from 'react';
 import { CitationPreviewModal } from '@/components/chat/CitationPreviewModal';
 
-export type Citation = { documentId: string; documentName: string; chunkId: string };
+export type Citation = {
+  documentId: string;
+  documentName: string;
+  chunkId: string;
+  // Set only for a citation whose source chunk came from a pasted URL —
+  // see lib/rag/chat.ts's Citation type (this is its client-side mirror,
+  // carried verbatim through the SSE "done" event and the stored Message
+  // row). Lets the citation chip render as a plain link to the real page
+  // instead of opening this preview modal.
+  sourceUrl: string | null;
+};
 
 type CitationPreviewContextValue = {
   openCitation: (citation: Citation) => void;

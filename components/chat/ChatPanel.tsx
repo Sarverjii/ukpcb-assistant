@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowUp, Copy, Check, RotateCw, Download, ChevronDown, FileText, FileDown, ThumbsUp, ThumbsDown, Pencil, Paperclip, X } from 'lucide-react';
+import { ArrowUp, Copy, Check, RotateCw, Download, ChevronDown, FileText, FileDown, ThumbsUp, ThumbsDown, Pencil, Paperclip, X, ExternalLink } from 'lucide-react';
 import { streamChat } from '@/components/chat/streamChat';
 import { Markdown } from '@/components/chat/Markdown';
 import { useCitationPreview, type Citation } from '@/components/chat/CitationPreviewContext';
@@ -655,17 +655,37 @@ function MessageBlock({
 
       {message.citations && message.citations.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {message.citations.map((c) => (
-            <button
-              key={c.chunkId}
-              type="button"
-              onClick={() => onCitationClick(c)}
-              title={`Preview cited passage from ${c.documentName}`}
-              className="rounded-full border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-2.5 py-0.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
-            >
-              {c.documentName}
-            </button>
-          ))}
+          {message.citations.map((c) =>
+            c.sourceUrl ? (
+              // A website-sourced citation opens the real live page
+              // directly, on click, in a new tab — there's no internal
+              // preview to show for it (it was never rendered into a
+              // PDF), so routing this through the same preview modal as
+              // an uploaded file would just add an extra click to get to
+              // the one thing worth showing.
+              <a
+                key={c.chunkId}
+                href={c.sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={`Open ${c.documentName} in a new tab`}
+                className="flex items-center gap-1 rounded-full border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-2.5 py-0.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
+              >
+                {c.documentName}
+                <ExternalLink size={10} className="shrink-0" />
+              </a>
+            ) : (
+              <button
+                key={c.chunkId}
+                type="button"
+                onClick={() => onCitationClick(c)}
+                title={`Preview cited passage from ${c.documentName}`}
+                className="rounded-full border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-2.5 py-0.5 text-xs text-zinc-600 dark:text-zinc-300 hover:border-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
+              >
+                {c.documentName}
+              </button>
+            ),
+          )}
         </div>
       )}
 
