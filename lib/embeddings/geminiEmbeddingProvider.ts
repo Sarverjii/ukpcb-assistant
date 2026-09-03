@@ -61,10 +61,36 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
 
     const results: number[][] = [];
     for (const batch of chunkArray(texts, BATCH_SIZE)) {
-      const vectors = await this.embedContentWithRetry(batch, taskType);
+      const vectors = await this.embedBatchWithFallback(batch, taskType);
       results.push(...vectors);
     }
     return results;
+  }
+
+  // Not every Gemini embedding model actually supports multiple texts in
+  // one embedContent call, despite the API accepting an array — confirmed
+  // directly against the real API: gemini-embedding-001 batches correctly,
+  // but gemini-embedding-2 always returns exactly 1 embedding no matter
+  // how many texts are sent (2 in, 1 back; 20 in, 1 back), silently
+  // discarding the rest rather than erroring or batching. There's no
+  // documented way to detect this ahead of time per model, so this treats
+  // a short response as a signal to fall back to one call per text for
+  // this batch — slower for a model that needs it, free for one that
+  // doesn't (the batched path stays the default, tried first).
+  private async embedBatchWithFallback(texts: string[], taskType: EmbeddingTaskType): Promise<number[][]> {
+    if (texts.length === 1) return this.embedContentWithRetry(texts, taskType);
+    try {
+      return await this.embedContentWithRetry(texts, taskType);
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Embedding batch size mismatch')) {
+        console.warn(
+          `[embeddings] ${this.model} doesn't appear to support batched embedContent calls — falling back to one call per text for this batch of ${texts.length}.`,
+        );
+        const singles = await Promise.all(texts.map((t) => this.embedContentWithRetry([t], taskType)));
+        return singles.map((s) => s[0]);
+      }
+      throw err;
+    }
   }
 
   private async embedContentWithRetry(
