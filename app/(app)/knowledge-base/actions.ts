@@ -280,14 +280,19 @@ export async function finalizeReplaceDocumentAction(
 // root page included. Kept deliberately small: processDocumentsSequentially
 // (below) processes every page's embeddings one at a time within this
 // same request's after() callback, which still shares the 60s maxDuration
-// every admin action here does — a model that needs the slow paced
-// embedding fallback (see GeminiEmbeddingProvider) can easily spend
-// several seconds per document, so this has real headroom to respect,
-// not just an arbitrary politeness limit. A real site can have thousands
-// of pages; this is a "grab a handful of the important ones a human just
-// linked you to," not a full-site mirror — run "Add from a URL" again
-// (with crawl checked) from a different starting page to pull in more.
-const MAX_CRAWL_PAGES = 6;
+// every admin action here does. Confirmed directly against production
+// that 6 was still too many: the root page alone (26 chunks, using the
+// slow per-text-paced fallback some embedding models need) used up
+// enough of that budget that the SECOND document's processing was cut
+// off mid-flight when Vercel killed the function for running too long —
+// left permanently stuck in PROCESSING, no error, no retry, since the
+// kill happens below where any catch block could run. 3 leaves real
+// margin. A real site can have thousands of pages; this is a "grab a
+// couple of the most important ones a human just linked you to," not a
+// full-site mirror — run "Add from a URL" again (with crawl checked)
+// from a different starting page, or add pages one at a time (crawl
+// off), to pull in more without hitting this ceiling.
+const MAX_CRAWL_PAGES = 3;
 
 export type AddUrlResult = ActionResult & { pagesAdded?: number };
 
