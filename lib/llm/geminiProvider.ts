@@ -1,5 +1,4 @@
 import { GoogleGenAI } from '@google/genai';
-import { config } from '@/lib/config';
 import type { ChatTurn, GenerateAnswerParams, LLMProvider } from '@/lib/llm/types';
 import {
   buildCondensePrompt,
@@ -19,29 +18,24 @@ import {
 // IMPORTANT: only works while no billing account is attached to the Google
 // Cloud project holding this API key — enabling billing switches the whole
 // project to paid, even for what would otherwise be free-tier calls.
-
-let client: GoogleGenAI | null = null;
-function getClient(): GoogleGenAI {
-  if (!config.GEMINI_API_KEY) {
-    throw new Error(
-      'GEMINI_API_KEY is not set. Get a free key at https://aistudio.google.com/apikey, ' +
-        'or set LLM_PROVIDER to "ollama" or "anthropic" instead.',
-    );
-  }
-  client ??= new GoogleGenAI({ apiKey: config.GEMINI_API_KEY });
-  return client;
-}
+//
+// Constructed fresh by lib/llm/index.ts on every getLLMProvider() call with
+// whichever credentials are currently active (DB-configured via Admin -> AI
+// Models, or the GEMINI_API_KEY/GEMINI_MODEL/GEMINI_FALLBACK_MODEL env vars
+// as a fallback — see that file) — apiKey/model/fallbackModel are
+// constructor params, not read from lib/config.ts directly, since the
+// active credential can change between requests without a redeploy.
 
 // Thrown when the requested model itself is unavailable — either
 // overloaded (503, after retries) or its OWN quota is exhausted (429; Gemini
-// meters free-tier quota per model, not per key/account, so a 429 on
-// GEMINI_MODEL says nothing about whether GEMINI_FALLBACK_MODEL — a
-// different model — has quota left. Confirmed directly: this app hit a real
-// 429 on gemini-flash-latest during testing while gemini-flash-lite-latest
-// kept working fine on the same key). generateAnswer() below is the one
-// place this is caught, to retry with GEMINI_FALLBACK_MODEL. A 401/403 is
-// NOT wrapped in this — an actual auth failure is about the key/account,
-// not the model, so it would fail identically on the fallback and should
+// meters free-tier quota per model, not per key/account, so a 429 on the
+// primary model says nothing about whether a fallback model — a different
+// model — has quota left. Confirmed directly: this app hit a real 429 on
+// gemini-flash-latest during testing while gemini-flash-lite-latest kept
+// working fine on the same key). generateAnswer() below is the one place
+// this is caught, to retry with the fallback model. A 401/403 is NOT
+// wrapped in this — an actual auth failure is about the key/account, not
+// the model, so it would fail identically on the fallback and should
 // surface immediately instead of doubling the latency of an already-broken
 // request.
 class GeminiModelUnavailableError extends Error {}
@@ -68,30 +62,46 @@ function buildContents({
 }
 
 export class GeminiLLMProvider implements LLMProvider {
+  private readonly apiKey: string;
+  private readonly model: string;
+  private readonly fallbackModel: string | undefined;
+  private client: GoogleGenAI | null = null;
+
+  constructor(options: { apiKey: string; model: string; fallbackModel?: string }) {
+    this.apiKey = options.apiKey;
+    this.model = options.model;
+    this.fallbackModel = options.fallbackModel;
+  }
+
+  private getClient(): GoogleGenAI {
+    this.client ??= new GoogleGenAI({ apiKey: this.apiKey });
+    return this.client;
+  }
+
   async generateAnswer(params: GenerateAnswerParams) {
     const { systemPrompt, contextChunks } = params;
     const contents = buildContents(params);
 
-    // Try the configured model first; if — and only if — GEMINI_MODEL
+    // Try the configured model first; if — and only if — the primary model
     // itself turns out to be unavailable (overloaded, or its own quota is
     // exhausted) after callWithRetry's own retries, fall back to
-    // GEMINI_FALLBACK_MODEL when one is set, rather than failing the whole
+    // fallbackModel when one is set, rather than failing the whole
     // request. Confirmed via repeated direct testing that gemini-flash-
     // latest's free-tier capacity/quota can be unavailable for stretches at
     // a time (persistent 503s in one run, a 429 in another — not a one-off
-    // blip either way) — this is what lets you point GEMINI_MODEL at the
-    // stronger model and still get a reliable app, instead of choosing one
-    // extreme or the other.
+    // blip either way) — this is what lets you point the primary model at
+    // the stronger model and still get a reliable app, instead of choosing
+    // one extreme or the other.
     try {
-      const text = await this.callWithRetry(contents, systemPrompt, config.GEMINI_MODEL);
+      const text = await this.callWithRetry(contents, systemPrompt, this.model);
       return { text, citedChunkIds: extractCitedChunkIds(text, contextChunks) };
     } catch (err) {
-      if (err instanceof GeminiModelUnavailableError && config.GEMINI_FALLBACK_MODEL) {
+      if (err instanceof GeminiModelUnavailableError && this.fallbackModel) {
         // Visible in server logs on purpose — this is the one signal that
-        // GEMINI_MODEL is currently unreliable, worth noticing over time
-        // rather than silently masking it every single request.
-        console.warn(`[gemini] ${err.message} Falling back to "${config.GEMINI_FALLBACK_MODEL}".`);
-        const text = await this.callWithRetry(contents, systemPrompt, config.GEMINI_FALLBACK_MODEL);
+        // the primary model is currently unreliable, worth noticing over
+        // time rather than silently masking it every single request.
+        console.warn(`[gemini] ${err.message} Falling back to "${this.fallbackModel}".`);
+        const text = await this.callWithRetry(contents, systemPrompt, this.fallbackModel);
         return { text, citedChunkIds: extractCitedChunkIds(text, contextChunks) };
       }
       throw err;
@@ -108,7 +118,7 @@ export class GeminiLLMProvider implements LLMProvider {
     attempt = 0,
   ): Promise<string> {
     try {
-      const response = await getClient().models.generateContent({
+      const response = await this.getClient().models.generateContent({
         model,
         contents,
         // Was 0.2. This app needs consistent rule-following (does this
@@ -131,7 +141,7 @@ export class GeminiLLMProvider implements LLMProvider {
         return this.callWithRetry(contents, systemPrompt, model, attempt + 1);
       }
       if (status === 401 || status === 403) {
-        throw new Error('Gemini API authentication failed — check GEMINI_API_KEY.');
+        throw new Error('Gemini API authentication failed — check the saved API key.');
       }
       if (status === 429) {
         throw new GeminiModelUnavailableError(`Gemini model "${model}" hit its free-tier rate limit.`);
@@ -152,11 +162,11 @@ export class GeminiLLMProvider implements LLMProvider {
   async *generateAnswerStream(params: GenerateAnswerParams): AsyncGenerator<string, void, void> {
     const contents = buildContents(params);
     try {
-      yield* this.streamWithModel(contents, params.systemPrompt, config.GEMINI_MODEL);
+      yield* this.streamWithModel(contents, params.systemPrompt, this.model);
     } catch (err) {
-      if (err instanceof GeminiModelUnavailableError && config.GEMINI_FALLBACK_MODEL) {
-        console.warn(`[gemini] ${err.message} Falling back to "${config.GEMINI_FALLBACK_MODEL}" (stream).`);
-        yield* this.streamWithModel(contents, params.systemPrompt, config.GEMINI_FALLBACK_MODEL);
+      if (err instanceof GeminiModelUnavailableError && this.fallbackModel) {
+        console.warn(`[gemini] ${err.message} Falling back to "${this.fallbackModel}" (stream).`);
+        yield* this.streamWithModel(contents, params.systemPrompt, this.fallbackModel);
         return;
       }
       throw err;
@@ -170,7 +180,7 @@ export class GeminiLLMProvider implements LLMProvider {
   ): AsyncGenerator<string, void, void> {
     let stream: Awaited<ReturnType<GoogleGenAI['models']['generateContentStream']>>;
     try {
-      stream = await getClient().models.generateContentStream({
+      stream = await this.getClient().models.generateContentStream({
         model,
         contents,
         config: { systemInstruction: systemPrompt, temperature: 0 },
@@ -181,7 +191,7 @@ export class GeminiLLMProvider implements LLMProvider {
       // different model with nothing lost.
       const status = (err as { status?: number })?.status;
       if (status === 401 || status === 403) {
-        throw new Error('Gemini API authentication failed — check GEMINI_API_KEY.');
+        throw new Error('Gemini API authentication failed — check the saved API key.');
       }
       if (status === 429) {
         throw new GeminiModelUnavailableError(`Gemini model "${model}" hit its free-tier rate limit.`);
@@ -208,8 +218,8 @@ export class GeminiLLMProvider implements LLMProvider {
   // question on any error from this method), so a second retry layer here
   // would only add latency to an already-handled failure case.
   async condenseQuestion(history: ChatTurn[], question: string): Promise<string> {
-    const response = await getClient().models.generateContent({
-      model: config.GEMINI_MODEL,
+    const response = await this.getClient().models.generateContent({
+      model: this.model,
       contents: [{ role: 'user', parts: [{ text: buildCondensePrompt(history, question) }] }],
       config: { temperature: 0 },
     });
@@ -222,8 +232,8 @@ export class GeminiLLMProvider implements LLMProvider {
   // keeps that bare fallback rather than getting a continuation; not worth
   // a second retry layer for a purely additive enhancement.
   async generalKnowledgeFallback(question: string): Promise<string | null> {
-    const response = await getClient().models.generateContent({
-      model: config.GEMINI_MODEL,
+    const response = await this.getClient().models.generateContent({
+      model: this.model,
       contents: [{ role: 'user', parts: [{ text: buildGeneralKnowledgeFallbackPrompt(question) }] }],
       config: { temperature: 0 },
     });

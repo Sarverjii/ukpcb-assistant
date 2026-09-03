@@ -82,6 +82,18 @@ const envSchema = z.object({
   // Read explicitly here and passed to handleUpload({ token }) rather than
   // relying on its implicit default.
   BLOB_READ_WRITE_TOKEN: z.string().optional(),
+
+  // Encrypts every API key an admin saves via Admin → AI Models (see
+  // lib/ai/crypto.ts) — AES-256-GCM, base64-encoded, must decode to exactly
+  // 32 bytes. Deliberately NOT stored in the database itself: the whole
+  // point of encrypting a saved key is that reading the database alone
+  // (a backup, a leaked connection string) isn't enough to recover it —
+  // this key has to live somewhere separate, i.e. here, in the platform's
+  // own env var store. Optional at the config level so a deployment that
+  // never touches the AI Models admin page doesn't need it; lib/ai/crypto.ts
+  // throws a clear, actionable error the moment it's actually needed
+  // without being set, rather than failing at startup for everyone.
+  AI_CREDENTIALS_ENCRYPTION_KEY: z.string().optional(),
 });
 
 export const config = envSchema.parse(process.env);

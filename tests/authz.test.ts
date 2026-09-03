@@ -60,7 +60,7 @@ beforeAll(async () => {
 
 describe('retrieveAuthorizedChunks (DB layer)', () => {
   it('never returns a chunk above the caller\'s clearance rank, for every seeded rank', async () => {
-    const embedder = getEmbeddingProvider();
+    const embedder = await getEmbeddingProvider();
     const [embedding] = await embedder.embed(['What are the merger and acquisition plans?'], 'RETRIEVAL_QUERY');
 
     for (const { roleName } of TEST_USERS) {
@@ -78,7 +78,7 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
   });
 
   it('the CXO document IS retrievable at CXO clearance and NOT at lower ranks', async () => {
-    const embedder = getEmbeddingProvider();
+    const embedder = await getEmbeddingProvider();
     const [embedding] = await embedder.embed(['Northwind acquisition due diligence'], 'RETRIEVAL_QUERY');
 
     const engineerCtx = await authContextFor('engineer@asktest.local');
@@ -116,7 +116,7 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
     const boardMergerDoc = await prisma.document.findFirstOrThrow({
       where: { name: 'Board Merger Plans' },
     });
-    const embedder = getEmbeddingProvider();
+    const embedder = await getEmbeddingProvider();
     const [embedding] = await embedder.embed(['merger plans'], 'RETRIEVAL_QUERY');
 
     const engineerCtx = await authContextFor('engineer@asktest.local');
@@ -158,7 +158,7 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
       await prisma.document.update({ where: { id: boardMergerDoc.id }, data: { departments: { connect: { id: otherDept.id } } } });
       await prisma.documentChunk.updateMany({ where: { documentId: boardMergerDoc.id }, data: { departmentIds: [otherDept.id] } });
 
-      const embedder = getEmbeddingProvider();
+      const embedder = await getEmbeddingProvider();
       const [embedding] = await embedder.embed(['Northwind acquisition due diligence'], 'RETRIEVAL_QUERY');
       const engineerRank = (await prisma.role.findUniqueOrThrow({ where: { id: engineer.roleId } })).hierarchyRank;
 

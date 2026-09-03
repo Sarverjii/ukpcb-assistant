@@ -211,6 +211,16 @@ export function describeAuditEvent(
       return `Changed "${role}"'s settings`;
     }
 
+    case 'AI_PROVIDER_ACTIVATED': {
+      const cap = str(m.capability) === 'LLM' ? 'chat/query' : 'embedding';
+      const prov = str(m.provider);
+      return prov ? `Activated ${prov} as the ${cap} provider` : `Activated an AI provider`;
+    }
+    case 'AI_PROVIDER_DEACTIVATED': {
+      const cap = str(m.capability) === 'LLM' ? 'chat/query' : 'embedding';
+      return `Reverted the ${cap} provider to its environment-variable default`;
+    }
+
     case 'ADMIN_REAUTH_FAILED':
       return resource
         ? `Entered the wrong password confirming: ${resource}`

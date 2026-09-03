@@ -1,4 +1,3 @@
-import { config } from '@/lib/config';
 import type { ChatTurn, GenerateAnswerParams, LLMProvider } from '@/lib/llm/types';
 import {
   buildCondensePrompt,
@@ -25,8 +24,18 @@ function buildMessages(params: GenerateAnswerParams) {
 // ready to pay for hosted inference — no other code changes needed.
 //
 // Requires Ollama installed and running (`ollama serve`, usually automatic),
-// with the configured model pulled (`ollama pull <OLLAMA_MODEL>`). See
-// README for setup.
+// with the configured model pulled (`ollama pull <model>`). See README for
+// setup. Doesn't work at all on the current Vercel deployment (no
+// persistent local network to reach a self-hosted server from) — wired up
+// and selectable in Admin -> AI Models regardless, ready for the day this
+// app moves to a self-hosted Linux/nginx deployment that can actually reach
+// an Ollama server.
+//
+// Constructed fresh by lib/llm/index.ts on every getLLMProvider() call with
+// whichever credentials are currently active (DB-configured via Admin -> AI
+// Models, or the OLLAMA_BASE_URL/OLLAMA_MODEL env vars as a fallback — see
+// that file) — baseUrl/model are constructor params, not read from
+// lib/config.ts directly.
 
 type OllamaChatResponse = {
   message?: { role: string; content: string };
@@ -34,16 +43,24 @@ type OllamaChatResponse = {
 };
 
 export class OllamaLLMProvider implements LLMProvider {
+  private readonly baseUrl: string;
+  private readonly model: string;
+
+  constructor(options: { baseUrl: string; model: string }) {
+    this.baseUrl = options.baseUrl;
+    this.model = options.model;
+  }
+
   async generateAnswer(params: GenerateAnswerParams) {
     const messages = buildMessages(params);
 
     let res: Response;
     try {
-      res = await fetch(`${config.OLLAMA_BASE_URL}/api/chat`, {
+      res = await fetch(`${this.baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: config.OLLAMA_MODEL,
+          model: this.model,
           messages,
           stream: false,
           // See the matching comment in geminiProvider.ts: this app needs
@@ -54,9 +71,9 @@ export class OllamaLLMProvider implements LLMProvider {
       });
     } catch {
       throw new Error(
-        `Could not reach Ollama at ${config.OLLAMA_BASE_URL}. Is it running? ` +
+        `Could not reach Ollama at ${this.baseUrl}. Is it running? ` +
           `Start it with \`ollama serve\` (or the desktop app), and make sure ` +
-          `\`ollama pull ${config.OLLAMA_MODEL}\` has been run at least once.`,
+          `\`ollama pull ${this.model}\` has been run at least once.`,
       );
     }
 
@@ -65,7 +82,7 @@ export class OllamaLLMProvider implements LLMProvider {
     if (!res.ok || data.error) {
       throw new Error(
         `Ollama error: ${data.error ?? res.statusText}. If the model isn't pulled yet, run ` +
-          `\`ollama pull ${config.OLLAMA_MODEL}\`.`,
+          `\`ollama pull ${this.model}\`.`,
       );
     }
 
@@ -78,11 +95,11 @@ export class OllamaLLMProvider implements LLMProvider {
 
     let res: Response;
     try {
-      res = await fetch(`${config.OLLAMA_BASE_URL}/api/chat`, {
+      res = await fetch(`${this.baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: config.OLLAMA_MODEL,
+          model: this.model,
           messages,
           stream: true,
           options: { temperature: 0 },
@@ -90,9 +107,9 @@ export class OllamaLLMProvider implements LLMProvider {
       });
     } catch {
       throw new Error(
-        `Could not reach Ollama at ${config.OLLAMA_BASE_URL}. Is it running? ` +
+        `Could not reach Ollama at ${this.baseUrl}. Is it running? ` +
           `Start it with \`ollama serve\` (or the desktop app), and make sure ` +
-          `\`ollama pull ${config.OLLAMA_MODEL}\` has been run at least once.`,
+          `\`ollama pull ${this.model}\` has been run at least once.`,
       );
     }
 
@@ -100,7 +117,7 @@ export class OllamaLLMProvider implements LLMProvider {
       const data = (await res.json().catch(() => ({}))) as OllamaChatResponse;
       throw new Error(
         `Ollama error: ${data.error ?? res.statusText}. If the model isn't pulled yet, run ` +
-          `\`ollama pull ${config.OLLAMA_MODEL}\`.`,
+          `\`ollama pull ${this.model}\`.`,
       );
     }
 
@@ -136,18 +153,18 @@ export class OllamaLLMProvider implements LLMProvider {
   async condenseQuestion(history: ChatTurn[], question: string): Promise<string> {
     let res: Response;
     try {
-      res = await fetch(`${config.OLLAMA_BASE_URL}/api/chat`, {
+      res = await fetch(`${this.baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: config.OLLAMA_MODEL,
+          model: this.model,
           messages: [{ role: 'user', content: buildCondensePrompt(history, question) }],
           stream: false,
           options: { temperature: 0 },
         }),
       });
     } catch {
-      throw new Error(`Could not reach Ollama at ${config.OLLAMA_BASE_URL}. Is it running?`);
+      throw new Error(`Could not reach Ollama at ${this.baseUrl}. Is it running?`);
     }
 
     const data = (await res.json()) as OllamaChatResponse;
@@ -163,18 +180,18 @@ export class OllamaLLMProvider implements LLMProvider {
   async generalKnowledgeFallback(question: string): Promise<string | null> {
     let res: Response;
     try {
-      res = await fetch(`${config.OLLAMA_BASE_URL}/api/chat`, {
+      res = await fetch(`${this.baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: config.OLLAMA_MODEL,
+          model: this.model,
           messages: [{ role: 'user', content: buildGeneralKnowledgeFallbackPrompt(question) }],
           stream: false,
           options: { temperature: 0 },
         }),
       });
     } catch {
-      throw new Error(`Could not reach Ollama at ${config.OLLAMA_BASE_URL}. Is it running?`);
+      throw new Error(`Could not reach Ollama at ${this.baseUrl}. Is it running?`);
     }
 
     const data = (await res.json()) as OllamaChatResponse;

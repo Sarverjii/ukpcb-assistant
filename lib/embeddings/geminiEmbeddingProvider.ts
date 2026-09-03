@@ -13,7 +13,16 @@ import type { EmbeddingProvider, EmbeddingTaskType } from '@/lib/embeddings/type
 // a sibling project (../Linkedin/server/src/services/embeddingClient.ts) —
 // not written from scratch/guessed.
 //
-// Reuses GEMINI_API_KEY (already required for chat) — no new signup.
+// Constructed fresh by lib/embeddings/index.ts on every getEmbeddingProvider()
+// call with whichever credentials are currently active (DB-configured via
+// Admin -> AI Models, or GEMINI_API_KEY/EMBEDDING_MODEL as a fallback — see
+// that file). apiKey/model are constructor params, not read from
+// lib/config.ts directly, since the active credential can change between
+// requests without a redeploy. `dimensions` is always
+// config.EMBEDDING_DIMENSIONS — the fixed vector(N) column width every
+// embedding provider in this app must honor, requested explicitly via
+// Gemini's outputDimensionality parameter, never left to the model's own
+// native size.
 
 // Batching keeps request count down (Gemini's free-tier rate limits are
 // per-request, not per-text) without risking an oversized single payload.
@@ -24,79 +33,83 @@ const MAX_ATTEMPTS = 3;
 // failing the whole batch over one blip.
 const RETRYABLE_STATUS = new Set([429, 500, 503]);
 
-let client: GoogleGenAI | null = null;
-function getClient(): GoogleGenAI {
-  if (!config.GEMINI_API_KEY) {
-    throw new Error(
-      'GEMINI_API_KEY is not set. Get a free key at https://aistudio.google.com/apikey, ' +
-        'or set EMBEDDING_PROVIDER to "local" instead.',
-    );
-  }
-  client ??= new GoogleGenAI({ apiKey: config.GEMINI_API_KEY });
-  return client;
-}
-
 function chunkArray<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
 }
 
-async function embedContentWithRetry(
-  texts: string[],
-  taskType: EmbeddingTaskType,
-  attempt = 0,
-): Promise<number[][]> {
-  try {
-    const response = await getClient().models.embedContent({
-      model: config.EMBEDDING_MODEL,
-      contents: texts,
-      config: {
-        outputDimensionality: config.EMBEDDING_DIMENSIONS,
-        taskType,
-      },
-    });
-
-    const embeddings = response.embeddings ?? [];
-    if (embeddings.length !== texts.length) {
-      throw new Error(
-        `Embedding batch size mismatch: sent ${texts.length} texts, got ${embeddings.length} embeddings back.`,
-      );
-    }
-
-    return embeddings.map((e, i) => {
-      const values = e.values ?? [];
-      if (values.length !== config.EMBEDDING_DIMENSIONS) {
-        throw new Error(
-          `Embedding dimension mismatch at index ${i}: expected ${config.EMBEDDING_DIMENSIONS} ` +
-            `(EMBEDDING_DIMENSIONS) but got ${values.length}. This usually means the embedding ` +
-            'model/config changed without a matching migration + re-embed of existing chunks.',
-        );
-      }
-      return values;
-    });
-  } catch (err) {
-    const status = (err as { status?: number })?.status;
-    if (status !== undefined && RETRYABLE_STATUS.has(status) && attempt < MAX_ATTEMPTS - 1) {
-      const delayMs = 1500 * 2 ** attempt;
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-      return embedContentWithRetry(texts, taskType, attempt + 1);
-    }
-    throw err instanceof Error ? err : new Error(String(err));
-  }
-}
-
 export class GeminiEmbeddingProvider implements EmbeddingProvider {
   readonly dimensions = config.EMBEDDING_DIMENSIONS;
+  private readonly apiKey: string;
+  private readonly model: string;
+  private client: GoogleGenAI | null = null;
+
+  constructor(options: { apiKey: string; model: string }) {
+    this.apiKey = options.apiKey;
+    this.model = options.model;
+  }
+
+  private getClient(): GoogleGenAI {
+    this.client ??= new GoogleGenAI({ apiKey: this.apiKey });
+    return this.client;
+  }
 
   async embed(texts: string[], taskType: EmbeddingTaskType = 'RETRIEVAL_DOCUMENT'): Promise<number[][]> {
     if (texts.length === 0) return [];
 
     const results: number[][] = [];
     for (const batch of chunkArray(texts, BATCH_SIZE)) {
-      const vectors = await embedContentWithRetry(batch, taskType);
+      const vectors = await this.embedContentWithRetry(batch, taskType);
       results.push(...vectors);
     }
     return results;
+  }
+
+  private async embedContentWithRetry(
+    texts: string[],
+    taskType: EmbeddingTaskType,
+    attempt = 0,
+  ): Promise<number[][]> {
+    try {
+      const response = await this.getClient().models.embedContent({
+        model: this.model,
+        contents: texts,
+        config: {
+          outputDimensionality: config.EMBEDDING_DIMENSIONS,
+          taskType,
+        },
+      });
+
+      const embeddings = response.embeddings ?? [];
+      if (embeddings.length !== texts.length) {
+        throw new Error(
+          `Embedding batch size mismatch: sent ${texts.length} texts, got ${embeddings.length} embeddings back.`,
+        );
+      }
+
+      return embeddings.map((e, i) => {
+        const values = e.values ?? [];
+        if (values.length !== config.EMBEDDING_DIMENSIONS) {
+          throw new Error(
+            `Embedding dimension mismatch at index ${i}: expected ${config.EMBEDDING_DIMENSIONS} ` +
+              `(EMBEDDING_DIMENSIONS) but got ${values.length}. This usually means the embedding ` +
+              'model/config changed without a matching migration + re-embed of existing chunks.',
+          );
+        }
+        return values;
+      });
+    } catch (err) {
+      const status = (err as { status?: number })?.status;
+      if (status !== undefined && RETRYABLE_STATUS.has(status) && attempt < MAX_ATTEMPTS - 1) {
+        const delayMs = 1500 * 2 ** attempt;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        return this.embedContentWithRetry(texts, taskType, attempt + 1);
+      }
+      if (status === 401 || status === 403) {
+        throw new Error('Gemini API authentication failed — check the saved API key.');
+      }
+      throw err instanceof Error ? err : new Error(String(err));
+    }
   }
 }

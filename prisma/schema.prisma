@@ -137,14 +137,15 @@ model User {
   createdAt       DateTime             @default(now())
   lastLoginAt     DateTime?
 
-  accounts          Account[]
-  sessions          Session[]
-  loginSessions     LoginSession[]
-  documents         Document[]            @relation("UploadedBy")
-  conversations     Conversation[]
-  auditLogs         AuditLog[]
-  importedBatches   EmployeeImportBatch[] @relation("ImportedBy")
-  headOfDepartments Department[]          @relation("DepartmentHead")
+  accounts                     Account[]
+  sessions                     Session[]
+  loginSessions                LoginSession[]
+  documents                    Document[]             @relation("UploadedBy")
+  conversations                Conversation[]
+  auditLogs                    AuditLog[]
+  importedBatches              EmployeeImportBatch[]  @relation("ImportedBy")
+  headOfDepartments            Department[]           @relation("DepartmentHead")
+  aiProviderCredentialsUpdated AIProviderCredential[]
 
   @@index([roleId])
   @@index([createdById])
@@ -400,6 +401,59 @@ model Message {
 enum MessageFeedback {
   UP
   DOWN
+}
+
+// --- AI provider configuration ------------------------------------------
+
+enum AICapability {
+  LLM
+  EMBEDDING
+}
+
+enum AIProviderKind {
+  ANTHROPIC
+  GEMINI
+  OPENAI
+  OLLAMA
+}
+
+// Runtime-switchable LLM/embedding provider configuration, admin-managed
+// from Admin → AI Models — see lib/llm/index.ts and
+// lib/embeddings/index.ts, which read the (capability, isActive) row here
+// FIRST and only fall back to the static env-var configuration in
+// lib/config.ts if no row is active for that capability. This is what
+// makes switching providers "plug and play": nothing here is required —
+// an untouched deployment behaves exactly as it did before this model
+// existed, entirely via env vars — but once an admin saves credentials and
+// activates a provider, that takes over immediately, no redeploy needed.
+//
+// One row per (capability, provider) pair, not per active selection — a
+// provider's credentials stay saved even while inactive, so switching back
+// to a previously-configured provider doesn't require re-entering its key.
+// `encryptedApiKey` is the only place a real secret lives in this schema —
+// see lib/ai/crypto.ts for the AES-256-GCM scheme. It is NEVER selected by
+// any query whose result can reach a client component; every UI-facing
+// read exposes only `isConfigured: encryptedApiKey !== null`, never the
+// value itself, encrypted or not — see lib/db/queries/aiProviders.ts.
+model AIProviderCredential {
+  id              String         @id @default(cuid())
+  capability      AICapability
+  provider        AIProviderKind
+  encryptedApiKey String?
+  // Ollama only — the base URL of the self-hosted server. Not a secret;
+  // stored in plain text.
+  baseUrl         String?
+  // Optional override of the provider's default model name (see
+  // lib/config.ts's own *_MODEL env vars for what "default" means per
+  // provider). Null means "use the built-in default for this provider."
+  model           String?
+  isActive        Boolean        @default(false)
+  updatedAt       DateTime       @updatedAt
+  updatedById     String?
+  updatedBy       User?          @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([capability, provider])
+  @@index([capability, isActive])
 }
 
 // --- Audit log ---------------------------------------------------------

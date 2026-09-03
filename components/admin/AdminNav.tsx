@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Users, Building2, Network, ScrollText, ChevronDown, Check } from 'lucide-react';
+import { LayoutDashboard, Users, Building2, Network, ScrollText, Cpu, ChevronDown, Check } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // Document management lives in the Evon Knowledge Base now (see
@@ -17,6 +17,7 @@ const SECTIONS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: '/admin/employees', label: 'Employees', icon: Users },
   { href: '/admin/departments', label: 'Departments', icon: Building2 },
   { href: '/admin/hierarchy', label: 'Hierarchy', icon: Network },
+  { href: '/admin/ai-providers', label: 'AI Models', icon: Cpu },
   { href: '/admin/audit-logs', label: 'Audit Log', icon: ScrollText },
 ];
 

@@ -93,7 +93,7 @@ export async function seedTestUsers() {
 }
 
 export async function seedFixtureDocuments() {
-  const embedder = getEmbeddingProvider();
+  const embedder = await getEmbeddingProvider();
   const cxo = await prisma.user.findUniqueOrThrow({ where: { email: 'cxo@asktest.local' } });
 
   for (const doc of FIXTURE_DOCS) {

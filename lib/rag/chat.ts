@@ -114,7 +114,7 @@ type RetrievedContext = {
 async function buildRetrievalQuery(conversationHistory: ChatTurn[], question: string): Promise<string> {
   if (conversationHistory.length === 0) return question;
   try {
-    const llm = getLLMProvider();
+    const llm = await getLLMProvider();
     const recentHistory = conversationHistory.slice(-MAX_CONDENSE_HISTORY_MESSAGES);
     return await llm.condenseQuestion(recentHistory, question);
   } catch (err) {
@@ -143,7 +143,7 @@ async function retrieveContext(
 ): Promise<RetrievedContext> {
   const retrievalQuery = await buildRetrievalQuery(conversationHistory, question);
 
-  const embedder = getEmbeddingProvider();
+  const embedder = await getEmbeddingProvider();
   const [queryEmbedding] = await embedder.embed([retrievalQuery], 'RETRIEVAL_QUERY');
 
   // Document *names/descriptions*, not content — fetched every turn now,
@@ -304,7 +304,7 @@ export async function answerQuestion(
     scopedDocumentIds,
   );
 
-  const llm = getLLMProvider();
+  const llm = await getLLMProvider();
   const { text: rawText, citedChunkIds } = await llm.generateAnswer({
     systemPrompt: CHAT_SYSTEM_PROMPT,
     contextChunks: relevant,
@@ -347,7 +347,7 @@ export async function* streamAnswer(
     scopedDocumentIds,
   );
 
-  const llm = getLLMProvider();
+  const llm = await getLLMProvider();
   let fullText = '';
   for await (const delta of llm.generateAnswerStream({
     systemPrompt: CHAT_SYSTEM_PROMPT,

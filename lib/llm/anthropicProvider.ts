@@ -1,5 +1,4 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { config } from '@/lib/config';
 import type { ChatTurn, GenerateAnswerParams, LLMProvider } from '@/lib/llm/types';
 import {
   buildCondensePrompt,
@@ -20,7 +19,7 @@ function buildMessages(params: GenerateAnswerParams): Anthropic.MessageParam[] {
 
 function mapAnthropicError(err: unknown): Error {
   if (err instanceof Anthropic.AuthenticationError) {
-    return new Error('Anthropic API authentication failed — check ANTHROPIC_API_KEY.');
+    return new Error('Anthropic API authentication failed — check the saved API key.');
   }
   if (err instanceof Anthropic.RateLimitError) {
     return new Error('Anthropic API rate limit hit — please retry shortly.');
@@ -31,26 +30,36 @@ function mapAnthropicError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
 
-let client: Anthropic | null = null;
-function getClient(): Anthropic {
-  if (!config.ANTHROPIC_API_KEY) {
-    throw new Error(
-      'ANTHROPIC_API_KEY is not set. Set LLM_PROVIDER=ollama to use the free local model instead, ' +
-        'or add a real Anthropic API key to switch to Claude.',
-    );
-  }
-  client ??= new Anthropic({ apiKey: config.ANTHROPIC_API_KEY });
-  return client;
-}
-
+// Constructed fresh by lib/llm/index.ts on every getLLMProvider() call with
+// whichever credentials are currently active (DB-configured via Admin -> AI
+// Models, or the ANTHROPIC_API_KEY/ANTHROPIC_MODEL env vars as a fallback —
+// see that file). Deliberately takes apiKey/model as constructor params
+// rather than reading lib/config.ts directly, unlike this file's own
+// pre-runtime-switchable-providers history: the active credential can
+// change between one request and the next without a redeploy, so nothing
+// in this class may read process.env or a module-level cache.
 export class AnthropicLLMProvider implements LLMProvider {
+  private readonly apiKey: string;
+  private readonly model: string;
+  private client: Anthropic | null = null;
+
+  constructor(options: { apiKey: string; model: string }) {
+    this.apiKey = options.apiKey;
+    this.model = options.model;
+  }
+
+  private getClient(): Anthropic {
+    this.client ??= new Anthropic({ apiKey: this.apiKey });
+    return this.client;
+  }
+
   async generateAnswer(params: GenerateAnswerParams) {
     const messages = buildMessages(params);
 
     let response: Anthropic.Message;
     try {
-      response = await getClient().messages.create({
-        model: config.ANTHROPIC_MODEL,
+      response = await this.getClient().messages.create({
+        model: this.model,
         max_tokens: 1024,
         system: params.systemPrompt,
         // Grounded, retrieval-based QA over a handful of short chunks isn't
@@ -87,8 +96,8 @@ export class AnthropicLLMProvider implements LLMProvider {
     // (it's not itself a Promise) — a connection/auth failure only ever
     // surfaces once iteration starts, not from this call, so there's
     // nothing to try/catch here.
-    const stream = getClient().messages.stream({
-      model: config.ANTHROPIC_MODEL,
+    const stream = this.getClient().messages.stream({
+      model: this.model,
       max_tokens: 1024,
       system: params.systemPrompt,
       output_config: { effort: 'low' },
@@ -112,8 +121,8 @@ export class AnthropicLLMProvider implements LLMProvider {
   // to the raw question on any failure from this method.
   async condenseQuestion(history: ChatTurn[], question: string): Promise<string> {
     try {
-      const response = await getClient().messages.create({
-        model: config.ANTHROPIC_MODEL,
+      const response = await this.getClient().messages.create({
+        model: this.model,
         max_tokens: 200,
         temperature: 0,
         messages: [{ role: 'user', content: buildCondensePrompt(history, question) }],
@@ -133,8 +142,8 @@ export class AnthropicLLMProvider implements LLMProvider {
   // fallback rather than getting a continuation.
   async generalKnowledgeFallback(question: string): Promise<string | null> {
     try {
-      const response = await getClient().messages.create({
-        model: config.ANTHROPIC_MODEL,
+      const response = await this.getClient().messages.create({
+        model: this.model,
         max_tokens: 600,
         temperature: 0,
         messages: [{ role: 'user', content: buildGeneralKnowledgeFallbackPrompt(question) }],

@@ -49,7 +49,7 @@ export async function processDocument(documentId: string): Promise<void> {
       throw new Error('No extractable text found in document.');
     }
 
-    const embedder = getEmbeddingProvider();
+    const embedder = await getEmbeddingProvider();
     const vectors = await embedder.embed(chunks.map((c) => c.content), 'RETRIEVAL_DOCUMENT');
 
     // clearanceLevel AND departments are copied onto every chunk here — see
