@@ -128,7 +128,8 @@ export function UrlUploadForm({ roles }: { roles: Role[] }) {
               className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-600 text-brand-600 focus:ring-brand-500"
             />
             <span className="text-zinc-700 dark:text-zinc-300">
-              Also fetch other pages linked from this one, on the same site (up to 15 total)
+              Also fetch other pages linked from this one, on the same site (up to 6 total — run this
+              again from a different page to pull in more)
             </span>
           </label>
           <div>

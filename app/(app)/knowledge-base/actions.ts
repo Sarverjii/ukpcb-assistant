@@ -276,23 +276,30 @@ export async function finalizeReplaceDocumentAction(
  * so nothing about chunking/embedding/indexing needed to be duplicated for
  * this path.
  */
-// Hard cap on how many pages one crawl request will fetch, root page
-// included — this action runs synchronously within one request/response
-// cycle (only each page's chunking/embedding is deferred via after()), so
-// it has to fit inside the same maxDuration every other admin action here
-// shares. A real site can have thousands of pages; this is a "grab the
-// important ones a human just linked you to," not a full-site mirror —
-// paste a more specific starting URL (e.g. a section index page) to
-// crawl a different slice, or just add more pages one at a time.
-const MAX_CRAWL_PAGES = 15;
+// Hard cap on how many pages one crawl request will fetch AND process,
+// root page included. Kept deliberately small: processDocumentsSequentially
+// (below) processes every page's embeddings one at a time within this
+// same request's after() callback, which still shares the 60s maxDuration
+// every admin action here does — a model that needs the slow paced
+// embedding fallback (see GeminiEmbeddingProvider) can easily spend
+// several seconds per document, so this has real headroom to respect,
+// not just an arbitrary politeness limit. A real site can have thousands
+// of pages; this is a "grab a handful of the important ones a human just
+// linked you to," not a full-site mirror — run "Add from a URL" again
+// (with crawl checked) from a different starting page to pull in more.
+const MAX_CRAWL_PAGES = 6;
 
 export type AddUrlResult = ActionResult & { pagesAdded?: number };
 
 /**
- * Saves one already-fetched page as a Document and defers its
- * processing — the part addDocumentFromUrlAction's single-page and
- * crawl paths both do per page, factored out so crawling isn't a
- * separate reimplementation of document creation.
+ * Saves one already-fetched page as a Document — the part
+ * addDocumentFromUrlAction's single-page and crawl paths both do per
+ * page, factored out so crawling isn't a separate reimplementation of
+ * document creation. Deliberately does NOT trigger processing itself
+ * (unlike every other document-creating action in this file) — see the
+ * caller for why: a crawl creates several documents in one request, and
+ * processing (which calls the embedding API) needs to happen for them
+ * ONE AT A TIME, not N independent after() callbacks racing each other.
  */
 async function saveFetchedPageAsDocument(
   page: { html: string; title: string | null; contentType: 'text/html' | 'text/plain' },
@@ -317,13 +324,31 @@ async function saveFetchedPageAsDocument(
     sourceUrl: url,
   });
 
-  after(() =>
-    processDocument(document.id).catch((err) => {
-      console.error('[documents] processing failed', document.id, err);
-    }),
-  );
-
   return document.id;
+}
+
+/**
+ * Processes several just-created documents ONE AT A TIME, not in
+ * parallel — confirmed directly against production this matters: every
+ * other document-creating action in this app only ever triggers ONE
+ * processDocument() per request, but a crawl creates several, and firing
+ * that many independent after() callbacks let them all hit the embedding
+ * API's shared rate limit at once (real quota, ~100 requests/minute -
+ * see GeminiEmbeddingProvider's own comment). All 15 pages from a real
+ * evontech.com crawl failed with RESOURCE_EXHAUSTED this way on the
+ * first attempt. Awaiting each document's processing before starting the
+ * next lets GeminiEmbeddingProvider's own pacing/retry logic (already
+ * built for exactly this quota) actually do its job instead of getting
+ * trampled by N-way concurrency it never anticipated.
+ */
+async function processDocumentsSequentially(documentIds: string[]): Promise<void> {
+  for (const id of documentIds) {
+    try {
+      await processDocument(id);
+    } catch (err) {
+      console.error('[documents] processing failed', id, err);
+    }
+  }
 }
 
 export async function addDocumentFromUrlAction(formData: FormData): Promise<AddUrlResult> {
@@ -364,8 +389,7 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
     throw err;
   }
 
-  await saveFetchedPageAsDocument(rootPage, url, nameOverride, clearanceLevel, ctx.userId);
-  let pagesAdded = 1;
+  const documentIds = [await saveFetchedPageAsDocument(rootPage, url, nameOverride, clearanceLevel, ctx.userId)];
 
   // Crawl mode: same-domain pages linked FROM the root page, fetched and
   // added the same way, up to the cap above. A page that fails to fetch
@@ -374,11 +398,10 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
   if (crawl && rootPage.contentType === 'text/html') {
     const links = discoverSameDomainLinks(rootPage.html, rootUrl).filter((l) => l !== url);
     for (const link of links) {
-      if (pagesAdded >= MAX_CRAWL_PAGES) break;
+      if (documentIds.length >= MAX_CRAWL_PAGES) break;
       try {
         const linkedPage = await fetchUrlForIngestion(link);
-        await saveFetchedPageAsDocument(linkedPage, link, '', clearanceLevel, ctx.userId);
-        pagesAdded++;
+        documentIds.push(await saveFetchedPageAsDocument(linkedPage, link, '', clearanceLevel, ctx.userId));
       } catch (err) {
         console.warn('[documents] crawl skipped a page', link, err instanceof Error ? err.message : err);
       }
@@ -390,9 +413,13 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
     result: 'SUCCESS',
     userId: ctx.userId,
     resource: rootUrl.hostname,
-    metadata: { url, clearanceLevel, crawl, pagesAdded },
+    metadata: { url, clearanceLevel, crawl, pagesAdded: documentIds.length },
   });
 
+  // See processDocumentsSequentially's own comment — one after() call
+  // processing every page in order, not one per page.
+  after(() => processDocumentsSequentially(documentIds));
+
   revalidatePath(KNOWLEDGE_BASE_PATH);
-  return { pagesAdded };
+  return { pagesAdded: documentIds.length };
 }
