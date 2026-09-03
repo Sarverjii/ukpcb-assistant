@@ -218,7 +218,16 @@ export async function reembedStaleChunksBatchAction(password?: string): Promise<
     return { remaining: 0, processed: 0, error: err instanceof Error ? err.message : 'No embedding provider is active.' };
   }
 
-  const BATCH_SIZE = 40;
+  // Deliberately small: some embedding models (confirmed for
+  // gemini-embedding-2) don't actually support batched embedContent calls
+  // despite accepting an array, so GeminiEmbeddingProvider falls back to
+  // one paced call per text at ~700ms apart (see its own comment — a real
+  // 100-requests/minute quota, discovered directly, makes this
+  // unavoidable). 40 texts through that path took ~55s in testing,
+  // dangerously close to the 60s maxDuration this action shares with
+  // every other route; 15 keeps a real margin for a model that needs the
+  // slow path while barely mattering for one that doesn't.
+  const BATCH_SIZE = 15;
   const stale = await listStaleChunkBatch(embedder.provider, embedder.model, BATCH_SIZE);
 
   if (stale.length > 0) {

@@ -39,6 +39,28 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+// The per-text fallback path (see embedBatchWithFallback) issues one
+// embedContent call per text instead of one per batch — confirmed
+// directly against the real API's own error response that this quota is
+// exactly 100 requests/minute, PER MODEL, on Gemini's free tier
+// (generativelanguage.googleapis.com/embed_content_free_tier_requests,
+// quotaValue "100", model gemini-embedding-2). An unbounded burst blew
+// through that instantly (a batch of 40-100 concurrent calls), and since
+// embedContentWithRetry's own backoff-retry runs inside that same burst,
+// the retries collided with the still-exceeded quota and failed too —
+// exponential backoff over ~4.5s total doesn't help against a per-minute
+// ceiling that needs 8+ seconds to reset. Pacing to one call every 700ms
+// (~85/min) stays under that ceiling with real headroom left over for
+// concurrent production traffic on the same key (live chat/document
+// embedding requests aren't paused during a bulk re-embed) — slower than
+// a real batch call, but the only way this path actually completes
+// instead of failing partway through every time.
+const FALLBACK_MIN_INTERVAL_MS = 700;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class GeminiEmbeddingProvider implements EmbeddingProvider {
   readonly dimensions = config.EMBEDDING_DIMENSIONS;
   readonly provider = 'GEMINI' as const;
@@ -84,10 +106,15 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('Embedding batch size mismatch')) {
         console.warn(
-          `[embeddings] ${this.model} doesn't appear to support batched embedContent calls — falling back to one call per text for this batch of ${texts.length}.`,
+          `[embeddings] ${this.model} doesn't appear to support batched embedContent calls — falling back to one paced call per text for this batch of ${texts.length}.`,
         );
-        const singles = await Promise.all(texts.map((t) => this.embedContentWithRetry([t], taskType)));
-        return singles.map((s) => s[0]);
+        const results: number[][] = [];
+        for (const t of texts) {
+          const [vector] = await this.embedContentWithRetry([t], taskType);
+          results.push(vector);
+          await sleep(FALLBACK_MIN_INTERVAL_MS);
+        }
+        return results;
       }
       throw err;
     }
