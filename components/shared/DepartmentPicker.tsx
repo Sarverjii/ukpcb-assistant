@@ -62,7 +62,21 @@ export function DepartmentPicker({
     // picker sits inside) closes the dropdown rather than trying to keep
     // fixed coordinates in sync with a moving trigger — the same
     // close-on-scroll behavior most browsers' own <select> dropdowns use.
-    function handleScroll() {
+    // Registered on window with capture:true so a scroll ANYWHERE closes
+    // the dropdown — including the page/table scrolling out from under
+    // this fixed-position panel, which is the actual point (see the
+    // comment above). Scroll events don't bubble, but still traverse the
+    // capturing phase through every ancestor of their real target,
+    // window included — so without the containment check below, this
+    // also fired (and immediately closed the panel) whenever the PANEL'S
+    // OWN scrollbar moved, since the panel is a descendant of window too.
+    // With exactly 7 departments the list is just tall enough to need
+    // that internal scroll, so this was a real bug: the last department
+    // or two in the list became permanently unreachable, confirmed
+    // directly (Playwright's scrollIntoView on a lower item closed the
+    // panel out from under it before the click could land).
+    function handleScroll(e: Event) {
+      if (panelRef.current?.contains(e.target as Node)) return;
       setOpen(false);
     }
     document.addEventListener('mousedown', handleClick);
