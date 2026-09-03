@@ -18,7 +18,7 @@ export type QueueItem = {
 type StartParams = {
   files: File[];
   clearanceLevel: number;
-  department?: string;
+  departmentIds?: string[];
   useClientUpload: boolean;
 };
 
@@ -89,7 +89,11 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
           updateItem(key, { status: 'uploading' });
           const result = await submitFile(
             file,
-            { name: stripExtension(file.name), clearanceLevel: params.clearanceLevel, department: params.department },
+            {
+              name: stripExtension(file.name),
+              clearanceLevel: params.clearanceLevel,
+              departmentIds: params.departmentIds,
+            },
             params.useClientUpload,
           );
           if ('error' in result) {

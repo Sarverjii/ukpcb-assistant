@@ -8,10 +8,15 @@ import { logAuditEvent } from '@/lib/audit/log';
 import {
   getDocument,
   updateDocumentClearance,
+  updateDocumentDepartments,
   deleteDocument as deleteDocumentRow,
   updateDocumentFile,
 } from '@/lib/db/queries/documents';
-import { deleteChunksForDocument, updateChunksClearanceForDocument } from '@/lib/db/queries/chunks';
+import {
+  deleteChunksForDocument,
+  updateChunksClearanceForDocument,
+  updateChunksDepartmentsForDocument,
+} from '@/lib/db/queries/chunks';
 import { getStorageProvider } from '@/lib/documents/storage';
 import { SUPPORTED_MIME_TYPES } from '@/lib/documents/textExtraction';
 import { processDocument } from '@/lib/documents/pipeline';
@@ -59,6 +64,46 @@ export async function changeDocumentClearanceAction(
     // or renamed — an id alone becomes meaningless the moment the row it
     // pointed to is gone.
     metadata: { documentName: doc.name, previousClearanceLevel, newClearanceLevel: clearanceLevel },
+  });
+  revalidatePath(KNOWLEDGE_BASE_PATH);
+  return {};
+}
+
+/**
+ * Retags which departments a document belongs to — same "manage at or
+ * below your own clearance" gate as changeDocumentClearanceAction, but
+ * doesn't touch clearanceLevel itself; departments are purely additive to
+ * that boundary, never a way to raise or lower it. Re-indexes the
+ * denormalized DocumentChunk.departmentIds immediately, exactly mirroring
+ * changeDocumentClearanceAction's own re-indexing.
+ */
+export async function changeDocumentDepartmentsAction(
+  documentId: string,
+  departmentIds: string[],
+): Promise<ActionResult> {
+  const ctx = await getAuthContext();
+  const doc = await getDocument(documentId);
+
+  try {
+    await requireCanManageDocument(ctx, doc.clearanceLevel);
+  } catch (err) {
+    if (err instanceof ForbiddenError) return { error: err.message };
+    throw err;
+  }
+
+  await updateDocumentDepartments(documentId, departmentIds);
+  await updateChunksDepartmentsForDocument(documentId, departmentIds);
+
+  await logAuditEvent({
+    action: 'DOCUMENT_DEPARTMENTS_CHANGED',
+    result: 'SUCCESS',
+    userId: ctx.userId,
+    resource: documentId,
+    metadata: {
+      documentName: doc.name,
+      previousDepartmentNames: doc.departments.map((d) => d.name),
+      newDepartmentCount: departmentIds.length,
+    },
   });
   revalidatePath(KNOWLEDGE_BASE_PATH);
   return {};

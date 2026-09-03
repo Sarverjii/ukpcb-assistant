@@ -17,6 +17,11 @@ export type AuthContext = {
   clearanceRank: number;
   canUploadDocuments: boolean;
   isAdmin: boolean;
+  // Every department this user belongs to (zero, one, several, or all) —
+  // purely additive to clearanceRank, never a replacement for it. See
+  // Department's schema.prisma comment and lib/db/queries/chunks.ts for the
+  // resulting "clearance OR department" document-visibility rule.
+  departmentIds: string[];
   themePreference: 'LIGHT' | 'DARK';
   // The current LoginSession's id — null for a token issued before this
   // feature existed (see the backward-compat note below). Lets Settings'
@@ -39,7 +44,7 @@ export async function getAuthContext(): Promise<AuthContext> {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { role: true },
+    include: { role: true, departments: { select: { id: true } } },
   });
 
   if (!user || user.status !== 'ACTIVE') throw new UnauthenticatedError();
@@ -65,6 +70,7 @@ export async function getAuthContext(): Promise<AuthContext> {
     clearanceRank: user.role.hierarchyRank,
     canUploadDocuments: user.role.canUploadDocuments,
     isAdmin: user.role.isAdmin,
+    departmentIds: user.departments.map((d) => d.id),
     themePreference: user.themePreference,
     loginSessionId,
   };

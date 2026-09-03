@@ -11,11 +11,14 @@ import {
   updateUserRole,
   updateUserStatus,
   updateUserPasswordHash,
+  updateUserDepartments,
   getUserById,
   getRoleById,
   listRolesByRank,
   deleteUser,
+  getExistingEmailSet,
 } from '@/lib/db/queries/users';
+import { listDepartments } from '@/lib/db/queries/departments';
 import { listDocumentsByUploader } from '@/lib/db/queries/documents';
 import { countConversationsForUser } from '@/lib/db/queries/conversations';
 import {
@@ -26,6 +29,9 @@ import {
   type ComposedEmail,
 } from '@/lib/employees/emailCompose';
 import { parseBulkImportFile, type BulkImportRow } from '@/lib/employees/bulkImportParse';
+import { buildImportErrorReportXlsx } from '@/lib/employees/importErrorReport';
+import { getStorageProvider } from '@/lib/documents/storage';
+import { prisma as db } from '@/lib/db/prisma';
 import { revalidatePath } from 'next/cache';
 
 export type ActionResult = { error?: string; email?: ComposedEmail };
@@ -37,7 +43,7 @@ export async function createEmployeeAction(formData: FormData): Promise<ActionRe
   const name = String(formData.get('name') ?? '').trim();
   const email = String(formData.get('email') ?? '').trim().toLowerCase();
   const roleId = String(formData.get('roleId') ?? '');
-  const department = String(formData.get('department') ?? '').trim() || undefined;
+  const departmentIds = formData.getAll('departmentIds').map(String).filter(Boolean);
 
   if (!name || !email || !roleId) {
     return { error: 'Name, email, and role are required.' };
@@ -48,7 +54,15 @@ export async function createEmployeeAction(formData: FormData): Promise<ActionRe
 
   let roleName: string;
   try {
-    const user = await createUser({ name, email, passwordHash, roleId, department });
+    const user = await createUser({
+      name,
+      email,
+      passwordHash,
+      roleId,
+      departmentIds,
+      createdById: ctx.userId,
+      creationMethod: 'MANUAL',
+    });
     const role = await getRoleById(roleId);
     roleName = role.name;
     await logAuditEvent({
@@ -59,7 +73,7 @@ export async function createEmployeeAction(formData: FormData): Promise<ActionRe
       // Names/emails captured directly, not just ids — this entry needs to
       // stay readable even after the employee is later renamed, moved to a
       // different role, or removed entirely.
-      metadata: { employeeName: name, email, roleName: role.name, department },
+      metadata: { employeeName: name, email, roleName: role.name, departmentCount: departmentIds.length },
     });
   } catch {
     return { error: 'Could not create employee — is that email already in use?' };
@@ -67,6 +81,32 @@ export async function createEmployeeAction(formData: FormData): Promise<ActionRe
 
   revalidatePath('/admin/employees');
   return { email: composeWelcomeEmail({ name, email, tempPassword, roleName }) };
+}
+
+/**
+ * Retags which departments an employee belongs to — same admin-only gate
+ * as changeEmployeeRoleAction, but with no self-modification restriction
+ * (department membership isn't a privilege escalation vector the way role/
+ * clearance is, so an admin changing their own departments is harmless).
+ */
+export async function changeEmployeeDepartmentsAction(
+  userId: string,
+  departmentIds: string[],
+): Promise<ActionResult> {
+  const ctx = await getAuthContext();
+  await requireAdmin(ctx);
+
+  const before = await getUserById(userId);
+  await updateUserDepartments(userId, departmentIds);
+  await logAuditEvent({
+    action: 'EMPLOYEE_DEPARTMENTS_CHANGED',
+    result: 'SUCCESS',
+    userId: ctx.userId,
+    resource: userId,
+    metadata: { employeeName: before.name, employeeEmail: before.email, newDepartmentCount: departmentIds.length },
+  });
+  revalidatePath('/admin/employees');
+  return {};
 }
 
 export async function changeEmployeeRoleAction(userId: string, roleId: string): Promise<ActionResult> {
@@ -272,21 +312,40 @@ export async function deleteEmployeePermanentlyAction(userId: string, password: 
 export type BulkImportRowResult = {
   rowNumber: number;
   email: string;
-  status: 'created' | 'error';
+  // 'skipped' is a harmless, expected outcome (the email already exists —
+  // re-uploading a sheet with existing employees in it must never
+  // duplicate them), distinct from 'error' (a genuine validation failure:
+  // bad role, bad department, missing field, or a real create failure).
+  status: 'created' | 'skipped' | 'error';
   message?: string;
 };
 
 export type BulkImportResult =
-  | { error: string; results?: undefined; emailsDocument?: undefined }
-  | { error?: undefined; results: BulkImportRowResult[]; emailsDocument: string | null };
+  | { error: string; results?: undefined; emailsDocument?: undefined; batchId?: undefined }
+  | { error?: undefined; results: BulkImportRowResult[]; emailsDocument: string | null; batchId: string };
 
 /**
- * Bulk-creates employees from an uploaded CSV/XLSX file. A bad row is
- * reported per-row, not fatal to the rest of the batch — one typo'd role
- * name shouldn't block 50 correctly-formed rows. Every successfully
- * created row is otherwise indistinguishable in the audit log from a
- * manually created employee (same EMPLOYEE_CREATED shape), plus one
- * summary EMPLOYEE_BULK_IMPORTED entry for the operation itself.
+ * Bulk-creates employees from an uploaded CSV/XLSX file — versioned and
+ * audited, not a fire-and-forget parse:
+ *
+ *  1. The raw file is persisted via getStorageProvider() and recorded as a
+ *     new EmployeeImportBatch BEFORE any row is processed, so every
+ *     created employee can carry a real importBatchId, and the sheet
+ *     itself stays viewable/downloadable later (see
+ *     app/api/admin/employee-imports/[id]/file).
+ *  2. Each row is validated against the LIVE role and department lists —
+ *     an unresolved role or department name fails that row (not the whole
+ *     batch); an email that already exists anywhere in the system is
+ *     SKIPPED, not an error, so re-uploading a sheet with new employees
+ *     added to it only ever creates the new ones.
+ *  3. Every row that didn't result in a new employee (skipped OR error) is
+ *     collected into a downloadable XLSX error report with a Reason column
+ *     (see buildImportErrorReportXlsx), stored on the batch alongside the
+ *     original file.
+ *  4. One summary EMPLOYEE_BULK_IMPORTED audit event is logged for the
+ *     operation; every successfully created row also gets its own
+ *     EMPLOYEE_CREATED entry, identical in shape to a manually created
+ *     employee.
  *
  * Returns the composed welcome emails as a single downloadable document
  * (see formatEmailsAsDocument) instead of ever showing a raw password list
@@ -313,25 +372,64 @@ export async function bulkImportEmployeesAction(formData: FormData): Promise<Bul
   const buffer = Buffer.from(await file.arrayBuffer());
   const parsed = await parseBulkImportFile(file.name, buffer);
   if (parsed.error) return { error: parsed.error };
+  const rows = parsed.rows as BulkImportRow[];
 
-  const roles = await listRolesByRank();
+  // Persist the sheet and create the batch record BEFORE processing any
+  // row, so every user created below can carry a real importBatchId from
+  // the start rather than being patched afterward.
+  const storage = getStorageProvider();
+  const fileKey = await storage.save(file.name, buffer);
+  const batch = await db.employeeImportBatch.create({
+    data: { fileKey, fileName: file.name, uploadedById: ctx.userId, rowCount: rows.length, successCount: 0, failureCount: 0 },
+  });
+
+  const [roles, departments, existingEmails] = await Promise.all([
+    listRolesByRank(),
+    listDepartments(),
+    getExistingEmailSet(),
+  ]);
   const roleByName = new Map(roles.map((r) => [r.name.toLowerCase(), r]));
+  const departmentByName = new Map(departments.map((d) => [d.name.toLowerCase(), d]));
   const seenEmails = new Set<string>();
 
   const results: BulkImportRowResult[] = [];
   const createdEmails: ComposedEmail[] = [];
+  const failedRows: { rowNumber: number; name: string; email: string; roleName: string; departmentNames: string[]; reason: string }[] = [];
 
-  for (const row of parsed.rows as BulkImportRow[]) {
-    const result = await importOneRow(row, roleByName, seenEmails, ctx.userId);
+  for (const row of rows) {
+    const result = await importOneRow(row, roleByName, departmentByName, existingEmails, seenEmails, ctx.userId, batch.id);
     results.push(result.rowResult);
     if (result.email) createdEmails.push(result.email);
+    if (result.rowResult.status !== 'created') {
+      failedRows.push({
+        rowNumber: row.rowNumber,
+        name: row.name,
+        email: row.email,
+        roleName: row.roleName,
+        departmentNames: row.departmentNames,
+        reason: result.rowResult.message ?? 'Unknown error',
+      });
+    }
   }
 
   const successCount = results.filter((r) => r.status === 'created').length;
+
+  let errorReportFileKey: string | null = null;
+  if (failedRows.length > 0) {
+    const reportBuffer = await buildImportErrorReportXlsx(failedRows);
+    errorReportFileKey = await storage.save(`${file.name}-errors.xlsx`, reportBuffer);
+  }
+
+  await db.employeeImportBatch.update({
+    where: { id: batch.id },
+    data: { successCount, failureCount: results.length - successCount, errorReportFileKey },
+  });
+
   await logAuditEvent({
     action: 'EMPLOYEE_BULK_IMPORTED',
     result: 'SUCCESS',
     userId: ctx.userId,
+    resource: batch.id,
     metadata: { fileName: file.name, rowCount: results.length, successCount, failureCount: results.length - successCount },
   });
 
@@ -339,14 +437,18 @@ export async function bulkImportEmployeesAction(formData: FormData): Promise<Bul
   return {
     results,
     emailsDocument: createdEmails.length > 0 ? formatEmailsAsDocument(createdEmails) : null,
+    batchId: batch.id,
   };
 }
 
 async function importOneRow(
   row: BulkImportRow,
   roleByName: Map<string, { id: string; name: string }>,
+  departmentByName: Map<string, { id: string; name: string }>,
+  existingEmails: Set<string>,
   seenEmails: Set<string>,
   actingAdminId: string,
+  importBatchId: string,
 ): Promise<{ rowResult: BulkImportRowResult; email?: ComposedEmail }> {
   const fail = (message: string): { rowResult: BulkImportRowResult } => ({
     rowResult: { rowNumber: row.rowNumber, email: row.email, status: 'error', message },
@@ -356,8 +458,26 @@ async function importOneRow(
   if (seenEmails.has(row.email)) return fail('Duplicate email within this file.');
   seenEmails.add(row.email);
 
+  // Already exists anywhere in the system (a prior upload, a manual add,
+  // or an earlier row already created in THIS run) — skipped, not an
+  // error, so re-uploading a growing sheet never duplicates anyone.
+  if (existingEmails.has(row.email)) {
+    return { rowResult: { rowNumber: row.rowNumber, email: row.email, status: 'skipped', message: 'Already exists' } };
+  }
+
   const role = roleByName.get(row.roleName.toLowerCase());
   if (!role) return fail(`Unknown role "${row.roleName}".`);
+
+  const departmentIds: string[] = [];
+  const unknownDepartments: string[] = [];
+  for (const name of row.departmentNames) {
+    const dept = departmentByName.get(name.toLowerCase());
+    if (dept) departmentIds.push(dept.id);
+    else unknownDepartments.push(name);
+  }
+  if (unknownDepartments.length > 0) {
+    return fail(`Unknown department${unknownDepartments.length === 1 ? '' : 's'}: ${unknownDepartments.join(', ')}.`);
+  }
 
   const tempPassword = generateTempPassword();
   const passwordHash = await hashPassword(tempPassword);
@@ -368,14 +488,24 @@ async function importOneRow(
       email: row.email,
       passwordHash,
       roleId: role.id,
-      department: row.department,
+      departmentIds,
+      createdById: actingAdminId,
+      creationMethod: 'BULK_IMPORT',
+      importBatchId,
     });
+    existingEmails.add(row.email); // guards a duplicate later in the SAME file even if seenEmails somehow missed it
     await logAuditEvent({
       action: 'EMPLOYEE_CREATED',
       result: 'SUCCESS',
       userId: actingAdminId,
       resource: user.id,
-      metadata: { employeeName: row.name, email: row.email, roleName: role.name, department: row.department, viaBulkImport: true },
+      metadata: {
+        employeeName: row.name,
+        email: row.email,
+        roleName: role.name,
+        departmentCount: departmentIds.length,
+        viaBulkImport: true,
+      },
     });
   } catch {
     return fail('Could not create — is that email already in use?');

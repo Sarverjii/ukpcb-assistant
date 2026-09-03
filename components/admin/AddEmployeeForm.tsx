@@ -3,14 +3,16 @@
 import { useState, useRef, useTransition } from 'react';
 import { createEmployeeAction } from '@/app/(app)/admin/employees/actions';
 import { EmailPreviewModal } from '@/components/admin/EmailPreviewModal';
+import { DepartmentPicker, type PickableDepartment } from '@/components/shared/DepartmentPicker';
 import type { ComposedEmail } from '@/lib/employees/emailCompose';
 
 type Role = { id: string; name: string; hierarchyRank: number };
 
-export function AddEmployeeForm({ roles }: { roles: Role[] }) {
+export function AddEmployeeForm({ roles, departments }: { roles: Role[]; departments: PickableDepartment[] }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewEmail, setPreviewEmail] = useState<ComposedEmail | null>(null);
+  const [departmentIds, setDepartmentIds] = useState<string[]>([]);
   const [pending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -18,6 +20,10 @@ export function AddEmployeeForm({ roles }: { roles: Role[] }) {
     e.preventDefault();
     setError(null);
     const formData = new FormData(e.currentTarget);
+    // DepartmentPicker isn't a native form element — its selection is
+    // appended manually rather than relying on FormData's automatic
+    // collection of named inputs.
+    for (const id of departmentIds) formData.append('departmentIds', id);
     startTransition(async () => {
       const result = await createEmployeeAction(formData);
       if (result.error) {
@@ -26,6 +32,7 @@ export function AddEmployeeForm({ roles }: { roles: Role[] }) {
       }
       if (result.email) setPreviewEmail(result.email);
       formRef.current?.reset();
+      setDepartmentIds([]);
     });
   }
 
@@ -69,10 +76,11 @@ export function AddEmployeeForm({ roles }: { roles: Role[] }) {
               </option>
             ))}
           </select>
-          <input
-            name="department"
-            placeholder="Department (optional)"
-            className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm"
+          <DepartmentPicker
+            departments={departments}
+            selectedIds={departmentIds}
+            onChange={setDepartmentIds}
+            placeholder="Departments (optional)"
           />
 
           <div className="col-span-1 flex items-center gap-3 sm:col-span-2">

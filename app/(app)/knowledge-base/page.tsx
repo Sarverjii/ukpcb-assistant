@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { getAuthContext } from '@/lib/auth/session';
 import { listDocumentsWithUploader } from '@/lib/db/queries/documents';
 import { listRolesByRank } from '@/lib/db/queries/users';
+import { listDepartments } from '@/lib/db/queries/departments';
 import { KnowledgeBase } from '@/components/documents/KnowledgeBase';
 import { config } from '@/lib/config';
 import { logAuditEvent } from '@/lib/audit/log';
@@ -42,9 +43,10 @@ export default async function KnowledgeBasePage() {
   // document as) and the documents list (what you can view/manage).
   const ceiling = ctx.isAdmin ? undefined : ctx.clearanceRank;
 
-  const [documents, roles] = await Promise.all([
+  const [documents, roles, departments] = await Promise.all([
     listDocumentsWithUploader(ceiling),
     listRolesByRank(),
+    listDepartments(),
   ]);
   const availableRoles = roles.filter((r) => ctx.isAdmin || r.hierarchyRank <= ctx.clearanceRank);
 
@@ -58,6 +60,7 @@ export default async function KnowledgeBasePage() {
       <div className="mt-6">
         <KnowledgeBase
           roles={availableRoles.map((r) => ({ hierarchyRank: r.hierarchyRank, name: r.name }))}
+          departments={departments.map((d) => ({ id: d.id, name: d.name }))}
           documents={documents.map((d) => ({
             id: d.id,
             name: d.name,
@@ -66,7 +69,7 @@ export default async function KnowledgeBasePage() {
             // deliberately kept, just with its uploader reference cleared.
             uploadedByName: d.uploadedBy?.name ?? 'Removed employee',
             clearanceLevel: d.clearanceLevel,
-            department: d.department,
+            departments: d.departments.map((dept) => ({ id: dept.id, name: dept.name })),
             status: d.status,
             createdAt: d.createdAt.toISOString(),
             updatedAt: d.updatedAt.toISOString(),

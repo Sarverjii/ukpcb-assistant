@@ -3,7 +3,9 @@ import ExcelJS from 'exceljs';
 
 // Fixed column template — case-insensitive header match. "role" is the
 // role's NAME (e.g. "Manager"), not an id, since a spreadsheet author has
-// no reason to know internal role ids.
+// no reason to know internal role ids. "departments" is semicolon-
+// separated (e.g. "Engineering; QA") so a flat spreadsheet cell can name
+// more than one — an employee may belong to any number of departments.
 const REQUIRED_HEADERS = ['name', 'email', 'role'] as const;
 
 export type BulkImportRow = {
@@ -11,7 +13,7 @@ export type BulkImportRow = {
   name: string;
   email: string;
   roleName: string;
-  department?: string;
+  departmentNames: string[];
 };
 
 export type BulkImportParseResult =
@@ -41,7 +43,9 @@ function rowsFromRecords(records: Record<string, string>[]): BulkImportParseResu
       name: byKey('name'),
       email: byKey('email').toLowerCase(),
       roleName: byKey('role'),
-      department: byKey('department') || undefined,
+      departmentNames: byKey('department') || byKey('departments')
+        ? (byKey('department') || byKey('departments')).split(';').map((d) => d.trim()).filter(Boolean)
+        : [],
     };
   });
 

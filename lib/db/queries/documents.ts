@@ -8,7 +8,7 @@ export type CreateDocumentInput = {
   mimeType: string;
   fileSizeBytes: number;
   clearanceLevel: number;
-  department?: string;
+  departmentIds?: string[];
   tags?: string[];
   uploadedById: string;
 };
@@ -22,7 +22,7 @@ export function createDocument(input: CreateDocumentInput) {
       mimeType: input.mimeType,
       fileSizeBytes: input.fileSizeBytes,
       clearanceLevel: input.clearanceLevel,
-      department: input.department,
+      departments: input.departmentIds?.length ? { connect: input.departmentIds.map((id) => ({ id })) } : undefined,
       tags: input.tags ?? [],
       uploadedById: input.uploadedById,
       status: 'PENDING',
@@ -30,8 +30,21 @@ export function createDocument(input: CreateDocumentInput) {
   });
 }
 
+/**
+ * Replaces a document's department tagging entirely (not merged) — paired
+ * with updateChunksDepartmentsForDocument (lib/db/queries/chunks.ts) at
+ * every call site, exactly mirroring how updateDocumentClearance is always
+ * paired with updateChunksClearanceForDocument.
+ */
+export function updateDocumentDepartments(id: string, departmentIds: string[]) {
+  return prisma.document.update({
+    where: { id },
+    data: { departments: { set: departmentIds.map((did) => ({ id: did })) } },
+  });
+}
+
 export function getDocument(id: string) {
-  return prisma.document.findUniqueOrThrow({ where: { id } });
+  return prisma.document.findUniqueOrThrow({ where: { id }, include: { departments: true } });
 }
 
 export function setDocumentStatus(id: string, status: DocumentStatus, processingError?: string) {
@@ -63,7 +76,7 @@ export function setDocumentPreviewFileKey(id: string, previewFileKey: string | n
 export function listDocumentsWithUploader(maxClearanceRank?: number) {
   return prisma.document.findMany({
     where: maxClearanceRank === undefined ? undefined : { clearanceLevel: { lte: maxClearanceRank } },
-    include: { uploadedBy: { select: { name: true, email: true } } },
+    include: { uploadedBy: { select: { name: true, email: true } }, departments: true },
     orderBy: { createdAt: 'desc' },
   });
 }
@@ -89,16 +102,26 @@ export function listDocumentsByUploader(uploadedById: string) {
  * listAccessibleDocumentSummaries (too narrow: no department/tags/dates,
  * built for the RAG document-inventory prompt, not a browsing UI).
  * Deliberately never takes an isAdmin bypass — every viewer, admin
- * included, sees only what their own clearanceRank allows here.
+ * included, sees only what their own clearanceRank/departments allow here.
+ * `userDepartmentIds` extends visibility additively — a document is shown
+ * if EITHER the clearance check passes OR the viewer shares a department
+ * with the document, mirroring the SQL-level rule in
+ * lib/db/queries/chunks.ts.
  */
-export function listAccessibleDocumentSummariesForBrowsing(userClearanceRank: number) {
+export function listAccessibleDocumentSummariesForBrowsing(userClearanceRank: number, userDepartmentIds: string[]) {
   return prisma.document.findMany({
-    where: { clearanceLevel: { lte: userClearanceRank }, status: 'READY' },
+    where: {
+      status: 'READY',
+      OR: [
+        { clearanceLevel: { lte: userClearanceRank } },
+        { departments: { some: { id: { in: userDepartmentIds } } } },
+      ],
+    },
     select: {
       id: true,
       name: true,
       description: true,
-      department: true,
+      departments: { select: { id: true, name: true } },
       tags: true,
       clearanceLevel: true,
       createdAt: true,
@@ -138,11 +161,18 @@ export function updateDocumentFile(
  * is a different data source (document inventory, not document content),
  * not a relaxation of the content-retrieval boundary. See
  * lib/rag/chat.ts::answerQuestion for how the two are kept separate in the
- * prompt the model actually sees.
+ * prompt the model actually sees. `userDepartmentIds` extends this the same
+ * additive way as listAccessibleDocumentSummariesForBrowsing above.
  */
-export function listAccessibleDocumentSummaries(userClearanceRank: number) {
+export function listAccessibleDocumentSummaries(userClearanceRank: number, userDepartmentIds: string[]) {
   return prisma.document.findMany({
-    where: { clearanceLevel: { lte: userClearanceRank }, status: 'READY' },
+    where: {
+      status: 'READY',
+      OR: [
+        { clearanceLevel: { lte: userClearanceRank } },
+        { departments: { some: { id: { in: userDepartmentIds } } } },
+      ],
+    },
     // id isn't sent to the LLM (see DocumentSummary in lib/llm/types.ts,
     // which only carries name/description) — it's used server-side by
     // lib/rag/documentNameMatch.ts to look up chunks when the question

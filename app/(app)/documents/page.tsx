@@ -1,6 +1,7 @@
 import { getAuthContext } from '@/lib/auth/session';
 import { listAccessibleDocumentSummariesForBrowsing } from '@/lib/db/queries/documents';
 import { listRolesByRank } from '@/lib/db/queries/users';
+import { listDepartments } from '@/lib/db/queries/departments';
 import { DocumentLibraryTable } from '@/components/documents/DocumentLibraryTable';
 
 // Every authenticated active employee can browse this — not gated on
@@ -10,10 +11,17 @@ import { DocumentLibraryTable } from '@/components/documents/DocumentLibraryTabl
 // exists" — unlike the management page's admin-sees-all behavior.
 export default async function DocumentLibraryPage() {
   const ctx = await getAuthContext();
-  const [documents, allRoles] = await Promise.all([
-    listAccessibleDocumentSummariesForBrowsing(ctx.clearanceRank),
+  const [documents, allRoles, allDepartments] = await Promise.all([
+    listAccessibleDocumentSummariesForBrowsing(ctx.clearanceRank, ctx.departmentIds),
     listRolesByRank(),
+    listDepartments(),
   ]);
+  // The library's own department filter (admin-only, same reasoning as the
+  // clearance filter below) still lists every department that exists, not
+  // just ones the viewer happens to see documents in — consistent with how
+  // the clearance filter lists every role up to the viewer's own rank
+  // regardless of whether a document exists at each level yet.
+  const departments = ctx.isAdmin ? allDepartments : [];
   // Capped to the viewer's own rank regardless of isAdmin — this page never
   // shows a document above the viewer's own clearance (see the query above),
   // so a filter option for a level they could never see anything at would
@@ -32,12 +40,13 @@ export default async function DocumentLibraryPage() {
             id: d.id,
             name: d.name,
             description: d.description,
-            department: d.department,
+            departments: d.departments,
             tags: d.tags,
             clearanceLevel: d.clearanceLevel,
             updatedAt: d.updatedAt.toISOString(),
           }))}
           roles={roles.map((r) => ({ hierarchyRank: r.hierarchyRank, name: r.name }))}
+          departments={departments.map((d) => ({ id: d.id, name: d.name }))}
           isAdmin={ctx.isAdmin}
         />
       </div>

@@ -25,7 +25,7 @@ export default async function RemovedEmployeeReviewPage({
         <h1 className="mt-1 text-lg font-semibold text-zinc-900 dark:text-white">{employee.name}</h1>
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
           {employee.email} · {employee.role.name}
-          {employee.department ? ` · ${employee.department}` : ''}
+          {employee.departments.length > 0 ? ` · ${employee.departments.map((d) => d.name).join(', ')}` : ''}
         </p>
       </div>
 

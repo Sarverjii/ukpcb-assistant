@@ -58,6 +58,14 @@ export function describeAuditEvent(
       }
       return `Changed ${label} clearance to ${roleName(m.newClearanceLevel)}`;
     }
+    case 'DOCUMENT_DEPARTMENTS_CHANGED': {
+      const name = str(m.documentName);
+      const count = num(m.newDepartmentCount);
+      const label = name ? `"${name}"` : 'a document';
+      return count !== null
+        ? `Changed ${label}'s departments (now ${count} department${count === 1 ? '' : 's'})`
+        : `Changed ${label}'s departments`;
+    }
     case 'DOCUMENT_REPLACED': {
       const name = str(m.documentName);
       return name ? `Replaced the file for "${name}"` : 'Replaced a document’s file';
@@ -138,6 +146,36 @@ export function describeAuditEvent(
         return `Bulk-imported ${success} of ${total} employee${total === 1 ? '' : 's'}${suffix}`;
       }
       return `Bulk-imported employees${suffix}`;
+    }
+
+    case 'EMPLOYEE_ROSTER_EXPORTED':
+      return 'Exported the current employee roster';
+    case 'EMPLOYEE_DEPARTMENTS_CHANGED': {
+      const name = str(m.employeeName) ?? 'an employee';
+      const count = num(m.newDepartmentCount);
+      return count !== null
+        ? `Changed ${name}'s departments (now ${count} department${count === 1 ? '' : 's'})`
+        : `Changed ${name}'s departments`;
+    }
+    case 'DEPARTMENT_CREATED': {
+      const name = str(m.name);
+      return name ? `Created department "${name}"` : 'Created a department';
+    }
+    case 'DEPARTMENT_RENAMED': {
+      const prev = str(m.previousName);
+      const next = str(m.newName);
+      if (prev && next) return `Renamed department "${prev}" to "${next}"`;
+      return next ? `Renamed a department to "${next}"` : 'Renamed a department';
+    }
+    case 'DEPARTMENT_MEMBER_ADDED': {
+      const dept = str(m.departmentName) ?? 'a department';
+      const emp = str(m.employeeName) ?? 'an employee';
+      return `Added ${emp} to ${dept}`;
+    }
+    case 'DEPARTMENT_MEMBER_REMOVED': {
+      const dept = str(m.departmentName) ?? 'a department';
+      const emp = str(m.employeeName) ?? 'an employee';
+      return `Removed ${emp} from ${dept}`;
     }
 
     case 'PASSWORD_CHANGED':

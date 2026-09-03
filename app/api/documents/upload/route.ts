@@ -43,7 +43,7 @@ export async function POST(request: Request) {
   const name = String(formData.get('name') ?? '').trim();
   const description = String(formData.get('description') ?? '').trim() || undefined;
   const clearanceLevelRaw = formData.get('clearanceLevel');
-  const department = String(formData.get('department') ?? '').trim() || undefined;
+  const departmentIds = formData.getAll('departmentIds').map(String).filter(Boolean);
   const tagsRaw = String(formData.get('tags') ?? '').trim();
 
   if (!(file instanceof File)) {
@@ -92,7 +92,7 @@ export async function POST(request: Request) {
     mimeType: file.type,
     fileSizeBytes: file.size,
     clearanceLevel,
-    department,
+    departmentIds,
     tags: tagsRaw ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) : [],
     uploadedById: ctx.userId,
   });

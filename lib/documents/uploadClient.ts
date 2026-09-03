@@ -52,7 +52,13 @@ export type UploadResult = { id: string; status: string } | { error: string };
  */
 export async function submitFile(
   file: File,
-  meta: { name: string; description?: string; clearanceLevel: number; department?: string; tags?: string[] },
+  meta: {
+    name: string;
+    description?: string;
+    clearanceLevel: number;
+    departmentIds?: string[];
+    tags?: string[];
+  },
   useClientUpload: boolean,
 ): Promise<UploadResult> {
   if (useClientUpload) {
@@ -78,7 +84,7 @@ export async function submitFile(
         name: meta.name,
         description: meta.description,
         clearanceLevel: meta.clearanceLevel,
-        department: meta.department,
+        departmentIds: meta.departmentIds ?? [],
         tags: meta.tags ?? [],
       }),
     });
@@ -91,7 +97,7 @@ export async function submitFile(
   formData.set('name', meta.name);
   if (meta.description) formData.set('description', meta.description);
   formData.set('clearanceLevel', String(meta.clearanceLevel));
-  if (meta.department) formData.set('department', meta.department);
+  for (const id of meta.departmentIds ?? []) formData.append('departmentIds', id);
   if (meta.tags?.length) formData.set('tags', meta.tags.join(','));
   const res = await fetch('/api/documents/upload', { method: 'POST', body: formData });
   const data = await res.json();

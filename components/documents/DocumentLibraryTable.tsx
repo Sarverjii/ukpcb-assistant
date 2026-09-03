@@ -1,12 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
 
 export type LibraryDocument = {
   id: string;
   name: string;
   description: string | null;
-  department: string | null;
+  departments: PickableDepartment[];
   tags: string[];
   clearanceLevel: number;
   updatedAt: string;
@@ -25,10 +26,14 @@ type Role = { hierarchyRank: number; name: string };
 export function DocumentLibraryTable({
   documents,
   roles,
+  departments,
   isAdmin,
 }: {
   documents: LibraryDocument[];
   roles: Role[];
+  // The full canonical department list (see listDepartments()) — only
+  // ever non-empty when isAdmin, per the page's own gating.
+  departments: PickableDepartment[];
   // Clearance/department filters are admin-only — a regular employee sees
   // only what their own clearance already lets through, so filtering by
   // clearance or department adds nothing for them but UI clutter.
@@ -36,13 +41,12 @@ export function DocumentLibraryTable({
 }) {
   const [search, setSearch] = useState('');
   const [clearanceFilter, setClearanceFilter] = useState('ALL');
-  const departments = Array.from(new Set(documents.map((d) => d.department).filter(Boolean))) as string[];
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
 
   const q = search.trim().toLowerCase();
   const filtered = documents.filter((d) => {
     if (clearanceFilter !== 'ALL' && String(d.clearanceLevel) !== clearanceFilter) return false;
-    if (departmentFilter !== 'ALL' && d.department !== departmentFilter) return false;
+    if (departmentFilter !== 'ALL' && !d.departments.some((dept) => dept.id === departmentFilter)) return false;
     if (q && !d.name.toLowerCase().includes(q) && !d.description?.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -81,8 +85,8 @@ export function DocumentLibraryTable({
           >
             <option value="ALL">All departments</option>
             {departments.map((d) => (
-              <option key={d} value={d}>
-                {d}
+              <option key={d.id} value={d.id}>
+                {d.name}
               </option>
             ))}
           </select>
@@ -109,11 +113,14 @@ export function DocumentLibraryTable({
               <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-600 dark:text-zinc-300">
                 {roleNameByRank.get(d.clearanceLevel) ?? `Level ${d.clearanceLevel}`}
               </span>
-              {d.department && (
-                <span className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-600 dark:text-zinc-300">
-                  {d.department}
+              {d.departments.map((dept) => (
+                <span
+                  key={dept.id}
+                  className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-600 dark:text-zinc-300"
+                >
+                  {dept.name}
                 </span>
-              )}
+              ))}
               {d.tags.map((tag) => (
                 <span
                   key={tag}

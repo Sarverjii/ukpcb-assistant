@@ -26,8 +26,19 @@ export type RetrievedChunk = {
  * LLM. Do not "fetch then filter in JS" this query; that would be the
  * insufficient pattern the spec explicitly calls out.
  *
- * `userClearanceRank` MUST come from a server-side, DB-verified session
- * (see lib/auth/session.ts::getAuthContext) — never from client input.
+ * A chunk is authorized if EITHER the caller's clearance rank covers it OR
+ * the caller belongs to at least one of the chunk's (denormalized)
+ * departments — the additive department-visibility rule (e.g. a document at
+ * "President" clearance tagged "HR" is visible to President-and-above AND
+ * to every HR employee regardless of their own rank). `dc."departmentIds"
+ * && userDepartmentIds` is Postgres's array-overlap operator; an empty
+ * `userDepartmentIds` array makes that side always false, so a
+ * departmentless caller correctly falls back to pure clearance with no
+ * special-casing needed.
+ *
+ * `userClearanceRank`/`userDepartmentIds` MUST come from a server-side,
+ * DB-verified session (see lib/auth/session.ts::getAuthContext) — never
+ * from client input.
  *
  * Uses Prisma's tagged-template $queryRaw, which parameterizes every
  * interpolated value — this is not string concatenation and is not
@@ -37,6 +48,7 @@ export type RetrievedChunk = {
 export async function retrieveAuthorizedChunks(
   queryEmbedding: number[],
   userClearanceRank: number,
+  userDepartmentIds: string[],
   topK = 6,
 ): Promise<RetrievedChunk[]> {
   const vec = toSql(queryEmbedding);
@@ -51,7 +63,7 @@ export async function retrieveAuthorizedChunks(
       1 - (dc.embedding <=> ${vec}::vector) AS similarity
     FROM "DocumentChunk" dc
     JOIN "Document" d ON d.id = dc."documentId"
-    WHERE dc."clearanceRank" <= ${userClearanceRank}
+    WHERE (dc."clearanceRank" <= ${userClearanceRank} OR dc."departmentIds" && ${userDepartmentIds}::text[])
       AND d.status = 'READY'
     ORDER BY dc.embedding <=> ${vec}::vector
     LIMIT ${topK}
@@ -63,9 +75,9 @@ export async function retrieveAuthorizedChunks(
  * already-authorized answer and expects to see the actual cited text. The
  * chunk's id alone (stored on the Message row) isn't proof of current
  * authorization — clearance can change after a message was sent — so this
- * re-checks `clearanceRank <= userClearanceRank` at read time, same as
- * every other chunk access in this app, rather than trusting that a chunk
- * id showing up in a citation once means it's still safe to show now.
+ * re-checks clearance-or-department at read time, same as every other
+ * chunk access in this app, rather than trusting that a chunk id showing
+ * up in a citation once means it's still safe to show now.
  */
 export type ChunkForUser = {
   id: string;
@@ -91,6 +103,7 @@ export type ChunkForUser = {
 export async function getChunkForUser(
   chunkId: string,
   userClearanceRank: number,
+  userDepartmentIds: string[],
 ): Promise<ChunkForUser | null> {
   const rows = await prisma.$queryRaw<ChunkForUser[]>`
     SELECT dc.id, dc.content, dc."documentId" AS "documentId", d.name AS "documentName",
@@ -98,7 +111,8 @@ export async function getChunkForUser(
            d."previewFileKey" AS "previewFileKey"
     FROM "DocumentChunk" dc
     JOIN "Document" d ON d.id = dc."documentId"
-    WHERE dc.id = ${chunkId} AND dc."clearanceRank" <= ${userClearanceRank}
+    WHERE dc.id = ${chunkId}
+      AND (dc."clearanceRank" <= ${userClearanceRank} OR dc."departmentIds" && ${userDepartmentIds}::text[])
     LIMIT 1
   `;
   return rows[0] ?? null;
@@ -111,9 +125,10 @@ export async function getChunkForUser(
  * chunks happen to score poorly on cosine similarity (see that module's
  * doc comment for the measured failure mode this exists to cover).
  *
- * SAME clearance filter as retrieveAuthorizedChunks — this is not a
- * separate, weaker code path. `documentIds` merely narrows WHICH documents
- * to look in; it does not bypass the clearance check for any of them.
+ * SAME clearance-or-department filter as retrieveAuthorizedChunks — this is
+ * not a separate, weaker code path. `documentIds` merely narrows WHICH
+ * documents to look in; it does not bypass the authorization check for any
+ * of them.
  *
  * Capped per document (not just overall) so one huge document can't crowd
  * out a second, smaller one that was also named in the same question.
@@ -122,6 +137,7 @@ export async function retrieveChunksForDocuments(
   documentIds: string[],
   queryEmbedding: number[],
   userClearanceRank: number,
+  userDepartmentIds: string[],
   capPerDocument = 8,
 ): Promise<RetrievedChunk[]> {
   if (documentIds.length === 0) return [];
@@ -142,7 +158,7 @@ export async function retrieveChunksForDocuments(
         ) AS rank
       FROM "DocumentChunk" dc
       JOIN "Document" d ON d.id = dc."documentId"
-      WHERE dc."clearanceRank" <= ${userClearanceRank}
+      WHERE (dc."clearanceRank" <= ${userClearanceRank} OR dc."departmentIds" && ${userDepartmentIds}::text[])
         AND d.status = 'READY'
         AND dc."documentId" = ANY(${documentIds}::text[])
     ) ranked
@@ -154,16 +170,17 @@ export async function retrieveChunksForDocuments(
 
 /**
  * Inserts chunks + embeddings for a document, denormalizing the parent
- * document's clearance level onto every chunk. This denormalization is what
- * lets retrieveAuthorizedChunks() filter without a join being load-bearing
- * for security — the clearance check lives directly on the row being
- * ordered by similarity.
+ * document's clearance level AND departments onto every chunk. This
+ * denormalization is what lets retrieveAuthorizedChunks() filter without a
+ * join being load-bearing for security — the authorization check lives
+ * directly on the row being ordered by similarity.
  */
 export async function insertDocumentChunks(
   documentId: string,
   chunks: { index: number; content: string; pageNumber?: number | null }[],
   embeddings: number[][],
   clearanceLevel: number,
+  departmentIds: string[] = [],
 ): Promise<void> {
   if (chunks.length !== embeddings.length) {
     throw new Error('chunks and embeddings length mismatch');
@@ -174,9 +191,9 @@ export async function insertDocumentChunks(
       const vec = toSql(embeddings[i]);
       return prisma.$executeRaw`
         INSERT INTO "DocumentChunk"
-          (id, "documentId", "chunkIndex", content, embedding, "clearanceRank", "pageNumber", "createdAt")
+          (id, "documentId", "chunkIndex", content, embedding, "clearanceRank", "departmentIds", "pageNumber", "createdAt")
         VALUES
-          (gen_random_uuid()::text, ${documentId}, ${chunk.index}, ${chunk.content}, ${vec}::vector, ${clearanceLevel}, ${chunk.pageNumber ?? null}, now())
+          (gen_random_uuid()::text, ${documentId}, ${chunk.index}, ${chunk.content}, ${vec}::vector, ${clearanceLevel}, ${departmentIds}::text[], ${chunk.pageNumber ?? null}, now())
       `;
     }),
     // Prisma's default interactive-transaction timeout is 5000ms, covering
@@ -215,5 +232,17 @@ export function updateChunksClearanceForDocument(documentId: string, clearanceRa
   return prisma.documentChunk.updateMany({
     where: { documentId },
     data: { clearanceRank },
+  });
+}
+
+/**
+ * Same re-indexing as updateChunksClearanceForDocument, for the department
+ * side: called whenever an admin changes which departments a document is
+ * tagged with, so retrieval reflects the new set immediately.
+ */
+export function updateChunksDepartmentsForDocument(documentId: string, departmentIds: string[]) {
+  return prisma.documentChunk.updateMany({
+    where: { documentId },
+    data: { departmentIds },
   });
 }

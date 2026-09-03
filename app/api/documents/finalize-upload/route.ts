@@ -37,7 +37,9 @@ export async function POST(request: Request) {
   const name = typeof body?.name === 'string' ? body.name.trim() : '';
   const description = typeof body?.description === 'string' ? body.description.trim() || undefined : undefined;
   const clearanceLevel = Number(body?.clearanceLevel);
-  const department = typeof body?.department === 'string' ? body.department.trim() || undefined : undefined;
+  const departmentIds: string[] = Array.isArray(body?.departmentIds)
+    ? body.departmentIds.filter((t: unknown) => typeof t === 'string')
+    : [];
   const tags: string[] = Array.isArray(body?.tags) ? body.tags.filter((t: unknown) => typeof t === 'string') : [];
 
   if (!pathname || !name) {
@@ -71,7 +73,7 @@ export async function POST(request: Request) {
     mimeType,
     fileSizeBytes,
     clearanceLevel,
-    department,
+    departmentIds,
     tags,
     uploadedById: ctx.userId,
   });

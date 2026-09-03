@@ -156,21 +156,27 @@ async function retrieveContext(
   // clearance rule as chunk retrieval. Also doubles as the candidate list
   // for matchDocumentsByName below. Fetched even in scoped mode (below) —
   // harmless, and still lets the model reason about "what else exists".
-  const accessibleDocuments = await listAccessibleDocumentSummaries(ctx.clearanceRank);
+  const accessibleDocuments = await listAccessibleDocumentSummaries(ctx.clearanceRank, ctx.departmentIds);
   const documentInventory = accessibleDocuments.map(({ name, description }) => ({ name, description }));
 
   // The user explicitly picked which document(s) to answer from (Feature 3
   // — a chat-composer document picker) — skip corpus-wide vector search
   // and name-matching entirely and pull only from the picked set.
-  // retrieveChunksForDocuments re-checks clearance in SQL regardless of
-  // what ids are passed, so a tampered/inaccessible id just yields zero
-  // chunks for it, never a bypass — same boundary as every other path.
+  // retrieveChunksForDocuments re-checks clearance-or-department in SQL
+  // regardless of what ids are passed, so a tampered/inaccessible id just
+  // yields zero chunks for it, never a bypass — same boundary as every
+  // other path.
   if (scopedDocumentIds && scopedDocumentIds.length > 0) {
-    const relevant = await retrieveChunksForDocuments(scopedDocumentIds, queryEmbedding, ctx.clearanceRank);
+    const relevant = await retrieveChunksForDocuments(
+      scopedDocumentIds,
+      queryEmbedding,
+      ctx.clearanceRank,
+      ctx.departmentIds,
+    );
     return { relevant, documentInventory, retrievalQuery };
   }
 
-  const vectorChunks = await retrieveAuthorizedChunks(queryEmbedding, ctx.clearanceRank, TOP_K);
+  const vectorChunks = await retrieveAuthorizedChunks(queryEmbedding, ctx.clearanceRank, ctx.departmentIds, TOP_K);
 
   // If the question directly names one of this user's authorized documents
   // (e.g. "what tools were used in the Rent project"), pull that document's
@@ -189,6 +195,7 @@ async function retrieveContext(
     matchedDocumentIds,
     queryEmbedding,
     ctx.clearanceRank,
+    ctx.departmentIds,
   );
 
   const chunks = mergeChunks(vectorChunks, nameMatchedChunks);

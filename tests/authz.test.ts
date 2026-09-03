@@ -41,6 +41,11 @@ async function authContextFor(email: string): Promise<AuthContext> {
     clearanceRank: user.role.hierarchyRank,
     canUploadDocuments: user.role.canUploadDocuments,
     isAdmin: user.role.isAdmin,
+    // None of the seeded fixture users belong to any department — these
+    // tests exercise the pure clearance-rank boundary; department-based
+    // access is covered separately (see the "departments" test group
+    // below, once added).
+    departmentIds: [],
     themePreference: user.themePreference,
     // No real login session in these tests — every code path under test
     // (answerQuestion/streamAnswer et al.) is session-agnostic.
@@ -61,7 +66,7 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
       const user = await authContextFor(
         TEST_USERS.find((u) => u.roleName === roleName)!.email,
       );
-      const results = await retrieveAuthorizedChunks(embedding, user.clearanceRank, 10);
+      const results = await retrieveAuthorizedChunks(embedding, user.clearanceRank, [], 10);
       for (const chunk of results) {
         expect(
           chunk.clearanceLevel,
@@ -78,10 +83,10 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
     const engineerCtx = await authContextFor('engineer@asktest.local');
     const cxoCtx = await authContextFor('cxo@asktest.local');
 
-    const asEngineer = await retrieveAuthorizedChunks(embedding, engineerCtx.clearanceRank, 10);
+    const asEngineer = await retrieveAuthorizedChunks(embedding, engineerCtx.clearanceRank, [], 10);
     expect(asEngineer.some((c) => c.documentName === 'Board Merger Plans')).toBe(false);
 
-    const asCxo = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, 10);
+    const asCxo = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [], 10);
     expect(asCxo.some((c) => c.documentName === 'Board Merger Plans')).toBe(true);
   });
 
@@ -93,10 +98,10 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
     const engineerCtx = await authContextFor('engineer@asktest.local');
     const cxoCtx = await authContextFor('cxo@asktest.local');
 
-    const asEngineer = await listAccessibleDocumentSummaries(engineerCtx.clearanceRank);
+    const asEngineer = await listAccessibleDocumentSummaries(engineerCtx.clearanceRank, []);
     expect(asEngineer.some((d) => d.name === 'Board Merger Plans')).toBe(false);
 
-    const asCxo = await listAccessibleDocumentSummaries(cxoCtx.clearanceRank);
+    const asCxo = await listAccessibleDocumentSummaries(cxoCtx.clearanceRank, []);
     expect(asCxo.some((d) => d.name === 'Board Merger Plans')).toBe(true);
   });
 
@@ -118,11 +123,12 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
       [boardMergerDoc.id],
       embedding,
       engineerCtx.clearanceRank,
+      [],
     );
     expect(asEngineer).toHaveLength(0);
 
     const cxoCtx = await authContextFor('cxo@asktest.local');
-    const asCxo = await retrieveChunksForDocuments([boardMergerDoc.id], embedding, cxoCtx.clearanceRank);
+    const asCxo = await retrieveChunksForDocuments([boardMergerDoc.id], embedding, cxoCtx.clearanceRank, []);
     expect(asCxo.length).toBeGreaterThan(0);
     expect(asCxo.every((c) => c.matchedByDocumentName)).toBe(true);
   });

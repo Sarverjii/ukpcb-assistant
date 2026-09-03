@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import {
   changeEmployeeRoleAction,
+  changeEmployeeDepartmentsAction,
   toggleEmployeeStatusAction,
   resetEmployeePasswordAction,
   removeEmployeeAction,
@@ -11,6 +12,7 @@ import {
 import { LocalTime } from '@/components/admin/LocalTime';
 import { ReauthDialog } from '@/components/admin/ReauthDialog';
 import { EmailPreviewModal } from '@/components/admin/EmailPreviewModal';
+import { DepartmentPicker, type PickableDepartment } from '@/components/shared/DepartmentPicker';
 import type { ComposedEmail } from '@/lib/employees/emailCompose';
 
 // listUsersWithRole (the sole source of this table's rows) excludes REMOVED
@@ -22,7 +24,7 @@ type User = {
   id: string;
   name: string;
   email: string;
-  department: string | null;
+  departments: PickableDepartment[];
   roleId: string;
   roleName: string;
   status: 'ACTIVE' | 'DISABLED' | 'REMOVED';
@@ -33,10 +35,12 @@ type Role = { id: string; name: string };
 export function EmployeesTable({
   users,
   roles,
+  departments,
   currentUserId,
 }: {
   users: User[];
   roles: Role[];
+  departments: PickableDepartment[];
   currentUserId: string;
 }) {
   const [search, setSearch] = useState('');
@@ -108,7 +112,13 @@ export function EmployeesTable({
           </thead>
           <tbody>
             {filtered.map((u) => (
-              <EmployeeRow key={u.id} user={u} roles={roles} isSelf={u.id === currentUserId} />
+              <EmployeeRow
+                key={u.id}
+                user={u}
+                roles={roles}
+                departments={departments}
+                isSelf={u.id === currentUserId}
+              />
             ))}
             {filtered.length === 0 && (
               <tr>
@@ -126,17 +136,37 @@ export function EmployeesTable({
 
 type ReauthAction = 'toggleStatus' | 'resetPassword' | 'remove';
 
-function EmployeeRow({ user, roles, isSelf }: { user: User; roles: Role[]; isSelf: boolean }) {
+function EmployeeRow({
+  user,
+  roles,
+  departments,
+  isSelf,
+}: {
+  user: User;
+  roles: Role[];
+  departments: PickableDepartment[];
+  isSelf: boolean;
+}) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [reauthAction, setReauthAction] = useState<ReauthAction | null>(null);
   const [previewEmail, setPreviewEmail] = useState<ComposedEmail | null>(null);
+  const [departmentIds, setDepartmentIds] = useState(user.departments.map((d) => d.id));
 
   function handleRoleChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const roleId = e.target.value;
     setError(null);
     startTransition(async () => {
       const result = await changeEmployeeRoleAction(user.id, roleId);
+      if (result.error) setError(result.error);
+    });
+  }
+
+  function handleDepartmentsChange(ids: string[]) {
+    setDepartmentIds(ids);
+    setError(null);
+    startTransition(async () => {
+      const result = await changeEmployeeDepartmentsAction(user.id, ids);
       if (result.error) setError(result.error);
     });
   }
@@ -161,7 +191,15 @@ function EmployeeRow({ user, roles, isSelf }: { user: User; roles: Role[]; isSel
     <tr className="border-t border-zinc-100 dark:border-zinc-800 align-top">
       <td className="px-3 py-2">{user.name}</td>
       <td className="px-3 py-2">{user.email}</td>
-      <td className="px-3 py-2">{user.department ?? '—'}</td>
+      <td className="px-3 py-2 min-w-[10rem]">
+        <DepartmentPicker
+          departments={departments}
+          selectedIds={departmentIds}
+          onChange={handleDepartmentsChange}
+          disabled={pending}
+          placeholder="—"
+        />
+      </td>
       <td className="px-3 py-2">
         <select
           defaultValue={user.roleId}

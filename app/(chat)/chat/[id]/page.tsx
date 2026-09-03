@@ -15,7 +15,7 @@ export default async function ConversationPage({
   // renders a 404, never someone else's messages.
   const [conversation, documents] = await Promise.all([
     getConversationForUser(id, ctx.userId),
-    listAccessibleDocumentSummaries(ctx.clearanceRank),
+    listAccessibleDocumentSummaries(ctx.clearanceRank, ctx.departmentIds),
   ]);
   if (!conversation) notFound();
 

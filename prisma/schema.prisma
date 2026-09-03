@@ -95,29 +95,102 @@ enum ThemePreference {
   DARK
 }
 
+// Distinguishes how a User row came to exist — purely informational,
+// nothing authorization-relevant reads this. Powers the "Added Via" column
+// on the live roster export (see app/api/admin/employees/export) and lets
+// the admin UI show provenance without joining through AuditLog, which has
+// no reliable link from a bulk-created row back to the batch that created
+// it (see EmployeeImportBatch's own comment).
+enum CreationMethod {
+  MANUAL
+  BULK_IMPORT
+}
+
 model User {
-  id              String          @id @default(cuid())
+  id              String               @id @default(cuid())
   name            String
-  email           String          @unique
+  email           String               @unique
   passwordHash    String
   roleId          String
-  role            Role            @relation(fields: [roleId], references: [id])
-  department      String?
-  status          UserStatus      @default(ACTIVE)
+  role            Role                 @relation(fields: [roleId], references: [id])
+  // Zero, one, several, or every department — an implicit Prisma M2M (see
+  // Department.users). Purely additive to the rank-based clearance system:
+  // see DocumentChunk.departmentIds and lib/db/queries/chunks.ts for the
+  // resulting "clearance OR department" visibility rule.
+  departments     Department[]
+  status          UserStatus           @default(ACTIVE)
   // Account-level, not browser-level — follows the user across devices/
   // browsers, unlike a localStorage-only preference. Defaults to LIGHT.
-  themePreference ThemePreference @default(LIGHT)
-  createdAt       DateTime        @default(now())
+  themePreference ThemePreference      @default(LIGHT)
+  // Provenance: who created this account (admin, self-relation), when
+  // (createdAt, already below), and how (creationMethod). Set at
+  // createEmployeeAction (MANUAL) and bulkImportEmployeesAction
+  // (BULK_IMPORT) time and never changed afterward — this is what makes the
+  // live roster export's "Added By / At / Via" columns queryable directly,
+  // with no AuditLog join required.
+  createdById     String?
+  createdBy       User?                @relation("CreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers    User[]               @relation("CreatedBy")
+  creationMethod  CreationMethod       @default(MANUAL)
+  importBatchId   String?
+  importBatch     EmployeeImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  createdAt       DateTime             @default(now())
   lastLoginAt     DateTime?
 
-  accounts      Account[]
-  sessions      Session[]
-  loginSessions LoginSession[]
-  documents     Document[]     @relation("UploadedBy")
-  conversations Conversation[]
-  auditLogs     AuditLog[]
+  accounts        Account[]
+  sessions        Session[]
+  loginSessions   LoginSession[]
+  documents       Document[]            @relation("UploadedBy")
+  conversations   Conversation[]
+  auditLogs       AuditLog[]
+  importedBatches EmployeeImportBatch[] @relation("ImportedBy")
 
   @@index([roleId])
+  @@index([createdById])
+  @@index([importBatchId])
+}
+
+// One row per uploaded employee CSV/XLSX, kept forever (never overwritten
+// or deleted by a later upload) so a past sheet stays viewable/downloadable
+// and every created employee can be traced back to the exact file and
+// admin that created them. See bulkImportEmployeesAction, which is the only
+// writer of this model.
+model EmployeeImportBatch {
+  id                 String   @id @default(cuid())
+  // The original uploaded file, via getStorageProvider() — downloadable
+  // again later, never edited in place.
+  fileKey            String
+  fileName           String
+  uploadedById       String?
+  uploadedBy         User?    @relation("ImportedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  uploadedAt         DateTime @default(now())
+  rowCount           Int
+  successCount       Int
+  failureCount       Int
+  // A generated XLSX of every row that failed validation (bad role, bad
+  // department, or a genuine parse error) with a Reason column — null when
+  // every row succeeded or was a harmless duplicate-email skip.
+  errorReportFileKey String?
+
+  createdUsers User[]
+
+  @@index([uploadedById])
+}
+
+// Admin-managed org structure, purely additive to the rank-based clearance
+// system above — see the module-level security note and
+// DocumentChunk.departmentIds. A User can belong to any number of
+// departments (including none, or all); a Document can be tagged with any
+// number too. No delete action is exposed in the admin UI (mirrors Role,
+// which also can't be deleted — only added/renamed/reordered), so nothing
+// in this app ever needs to handle "a document's department disappeared".
+model Department {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  users     User[]
+  documents Document[]
 }
 
 // A revocable record of one login, tracked entirely separately from Auth.js's
@@ -171,7 +244,13 @@ model Document {
   // document. Stored as a plain int (not a Role relation) so it survives
   // even if roles are later restructured, and so it's cheap to compare.
   clearanceLevel  Int
-  department      String?
+  // Zero, one, or several departments — an implicit Prisma M2M (see
+  // Department.documents). Purely additive to clearanceLevel: a viewer sees
+  // this document if their rank covers clearanceLevel OR they belong to any
+  // department listed here. Denormalized onto DocumentChunk.departmentIds
+  // at write time for the same reason clearanceRank already is — see this
+  // file's module-level security note.
+  departments     Department[]
   tags            String[]       @default([])
   // Nullable so a hard-deleted employee (see deleteEmployeePermanentlyAction)
   // never forces their documents to be deleted along with them — the FK
@@ -210,6 +289,14 @@ model DocumentChunk {
   // filters on.
   clearanceRank Int
 
+  // Denormalized from Document.departments at insert/update time — same
+  // reasoning as clearanceRank above, applied to the additive
+  // department-visibility rule. Empty array for a document with no
+  // departments (falls back to pure clearance). Checked via Postgres's
+  // array-overlap operator (&&) against the viewer's own department ids —
+  // see lib/db/queries/chunks.ts.
+  departmentIds String[] @default([])
+
   // 1-based PDF page number or PPTX slide number this chunk's text was
   // extracted from — null for DOCX/TXT/MD, which have no fixed pagination
   // in the source file itself (a DOCX's page breaks are a function of the
@@ -229,7 +316,7 @@ model DocumentChunk {
 // --- Conversations ---------------------------------------------------------
 
 model Conversation {
-  id        String    @id @default(cuid())
+  id        String   @id @default(cuid())
   userId    String
   // Cascade (not the default Restrict): when an employee is hard-deleted
   // (deleteEmployeePermanentlyAction), their conversations — and, via
@@ -237,10 +324,10 @@ model Conversation {
   // with them. This is the one piece of a removed employee's data that is
   // NOT preserved, by explicit user decision; contrast with Document and
   // AuditLog, which both survive with the reference nulled out instead.
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   title     String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   messages Message[]
 
@@ -253,9 +340,9 @@ enum MessageRole {
 }
 
 model Message {
-  id             String       @id @default(cuid())
+  id             String           @id @default(cuid())
   conversationId String
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   role           MessageRole
   content        String
   // [{ documentId, documentName, chunkId }] — only ever populated from
@@ -273,7 +360,7 @@ model Message {
   // been touched. Purely informational (renders a small "(edited)" marker);
   // nothing reads it to decide behavior.
   editedAt       DateTime?
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime         @default(now())
 
   @@index([conversationId])
 }

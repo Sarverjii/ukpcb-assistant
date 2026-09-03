@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { UploadForm } from '@/components/documents/UploadForm';
 import { DocumentsTable, type DocumentRow } from '@/components/documents/DocumentsTable';
 import { useUploadQueue } from '@/components/documents/UploadQueueContext';
+import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
 
 type Role = { hierarchyRank: number; name: string };
 
@@ -29,11 +30,13 @@ type Role = { hierarchyRank: number; name: string };
 export function KnowledgeBase({
   roles,
   documents,
+  departments,
   useClientUpload,
   uploadMaxMb,
 }: {
   roles: Role[];
   documents: DocumentRow[];
+  departments: PickableDepartment[];
   useClientUpload: boolean;
   uploadMaxMb: number;
 }) {
@@ -62,6 +65,7 @@ export function KnowledgeBase({
         <div className="mt-4">
           <UploadForm
             roles={roles}
+            departments={departments}
             useClientUpload={useClientUpload}
             uploadMaxMb={uploadMaxMb}
             onUploadingChange={setSingleUploading}
@@ -80,7 +84,12 @@ export function KnowledgeBase({
           )}
         </div>
         <div className="mt-4">
-          <DocumentsTable documents={documents} roles={roles} useClientUpload={useClientUpload} />
+          <DocumentsTable
+            documents={documents}
+            roles={roles}
+            departments={departments}
+            useClientUpload={useClientUpload}
+          />
         </div>
       </section>
     </div>

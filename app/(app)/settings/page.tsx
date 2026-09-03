@@ -7,12 +7,14 @@ import { SessionsList } from '@/components/settings/SessionsList';
 
 export default async function SettingsPage() {
   const ctx = await getAuthContext();
-  // department isn't on AuthContext (nothing authorization-relevant reads
-  // it — see prisma/schema.prisma's note that it's an unused extension
-  // point for future dept-scoped ACLs), so it's fetched directly here just
-  // to display it.
+  // ctx.departmentIds only carries ids (all that authorization needs) —
+  // department NAMES are fetched directly here just to display them.
+  // Departments now genuinely affect what this user can see (the
+  // clearance-OR-department document-visibility rule — see
+  // lib/db/queries/chunks.ts), unlike the free-text field this replaced,
+  // which was purely cosmetic.
   const [user, sessions] = await Promise.all([
-    prisma.user.findUniqueOrThrow({ where: { id: ctx.userId }, select: { department: true } }),
+    prisma.user.findUniqueOrThrow({ where: { id: ctx.userId }, select: { departments: { select: { name: true } } } }),
     listSessionsForUser(ctx.userId),
   ]);
 
@@ -29,7 +31,10 @@ export default async function SettingsPage() {
           <Field label="Name" value={ctx.name} />
           <Field label="Email" value={ctx.email} />
           <Field label="Role" value={ctx.roleName} />
-          <Field label="Department" value={user.department ?? '—'} />
+          <Field
+            label="Departments"
+            value={user.departments.length > 0 ? user.departments.map((d) => d.name).join(', ') : '—'}
+          />
         </dl>
       </section>
 

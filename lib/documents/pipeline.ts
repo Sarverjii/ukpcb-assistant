@@ -52,9 +52,16 @@ export async function processDocument(documentId: string): Promise<void> {
     const embedder = getEmbeddingProvider();
     const vectors = await embedder.embed(chunks.map((c) => c.content), 'RETRIEVAL_DOCUMENT');
 
-    // clearanceLevel is copied onto every chunk here — see the
-    // denormalization note in prisma/schema.prisma and lib/db/queries/chunks.ts.
-    await insertDocumentChunks(documentId, chunks, vectors, doc.clearanceLevel);
+    // clearanceLevel AND departments are copied onto every chunk here — see
+    // the denormalization note in prisma/schema.prisma and
+    // lib/db/queries/chunks.ts.
+    await insertDocumentChunks(
+      documentId,
+      chunks,
+      vectors,
+      doc.clearanceLevel,
+      doc.departments.map((d) => d.id),
+    );
 
     // A native PDF already IS the viewable file (fileKey) — nothing to
     // generate. Every other format gets a clean, generated PDF rendition

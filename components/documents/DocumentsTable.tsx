@@ -4,19 +4,21 @@ import { useRef, useState, useTransition } from 'react';
 import { upload } from '@vercel/blob/client';
 import {
   changeDocumentClearanceAction,
+  changeDocumentDepartmentsAction,
   deleteDocumentAction,
   replaceDocumentAction,
   finalizeReplaceDocumentAction,
 } from '@/app/(app)/knowledge-base/actions';
 import { LocalTime } from '@/components/admin/LocalTime';
 import { ACCEPTED_EXTENSIONS } from '@/lib/documents/uploadClient';
+import { DepartmentPicker, type PickableDepartment } from '@/components/shared/DepartmentPicker';
 
 export type DocumentRow = {
   id: string;
   name: string;
   uploadedByName: string;
   clearanceLevel: number;
-  department: string | null;
+  departments: PickableDepartment[];
   status: 'PENDING' | 'PROCESSING' | 'READY' | 'FAILED';
   createdAt: string;
   updatedAt: string;
@@ -26,17 +28,17 @@ type Role = { hierarchyRank: number; name: string };
 export function DocumentsTable({
   documents,
   roles,
+  departments,
   useClientUpload,
 }: {
   documents: DocumentRow[];
   roles: Role[];
+  departments: PickableDepartment[];
   useClientUpload: boolean;
 }) {
   const [search, setSearch] = useState('');
   const [clearanceFilter, setClearanceFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
-
-  const departments = Array.from(new Set(documents.map((d) => d.department).filter(Boolean))) as string[];
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
 
   // Filtered client-side for the same reason as EmployeesTable: the corpus
@@ -47,7 +49,7 @@ export function DocumentsTable({
   const filtered = documents.filter((d) => {
     if (clearanceFilter !== 'ALL' && String(d.clearanceLevel) !== clearanceFilter) return false;
     if (statusFilter !== 'ALL' && d.status !== statusFilter) return false;
-    if (departmentFilter !== 'ALL' && d.department !== departmentFilter) return false;
+    if (departmentFilter !== 'ALL' && !d.departments.some((dept) => dept.id === departmentFilter)) return false;
     if (q && !d.name.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -93,8 +95,8 @@ export function DocumentsTable({
           >
             <option value="ALL">All departments</option>
             {departments.map((dept) => (
-              <option key={dept} value={dept}>
-                {dept}
+              <option key={dept.id} value={dept.id}>
+                {dept.name}
               </option>
             ))}
           </select>
@@ -119,7 +121,13 @@ export function DocumentsTable({
           </thead>
           <tbody>
             {filtered.map((d) => (
-              <DocumentRow key={d.id} doc={d} roles={roles} useClientUpload={useClientUpload} />
+              <DocumentRow
+                key={d.id}
+                doc={d}
+                roles={roles}
+                departments={departments}
+                useClientUpload={useClientUpload}
+              />
             ))}
             {filtered.length === 0 && (
               <tr>
@@ -138,15 +146,18 @@ export function DocumentsTable({
 function DocumentRow({
   doc,
   roles,
+  departments,
   useClientUpload,
 }: {
   doc: DocumentRow;
   roles: Role[];
+  departments: PickableDepartment[];
   useClientUpload: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [departmentIds, setDepartmentIds] = useState(doc.departments.map((d) => d.id));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function handleClearanceChange(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -154,6 +165,15 @@ function DocumentRow({
     setError(null);
     startTransition(async () => {
       const result = await changeDocumentClearanceAction(doc.id, level);
+      if (result.error) setError(result.error);
+    });
+  }
+
+  function handleDepartmentsChange(ids: string[]) {
+    setDepartmentIds(ids);
+    setError(null);
+    startTransition(async () => {
+      const result = await changeDocumentDepartmentsAction(doc.id, ids);
       if (result.error) setError(result.error);
     });
   }
@@ -230,7 +250,15 @@ function DocumentRow({
           ))}
         </select>
       </td>
-      <td className="px-3 py-2">{doc.department ?? '—'}</td>
+      <td className="px-3 py-2 min-w-[10rem]">
+        <DepartmentPicker
+          departments={departments}
+          selectedIds={departmentIds}
+          onChange={handleDepartmentsChange}
+          disabled={pending}
+          placeholder="—"
+        />
+      </td>
       <td className="px-3 py-2">
         <StatusPill status={doc.status} />
       </td>

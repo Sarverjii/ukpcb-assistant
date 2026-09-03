@@ -20,6 +20,7 @@ import {
   validateFile,
 } from '@/lib/documents/uploadClient';
 import { useUploadQueue, type QueueItem } from '@/components/documents/UploadQueueContext';
+import { DepartmentPicker, type PickableDepartment } from '@/components/shared/DepartmentPicker';
 
 type Role = { name: string; hierarchyRank: number };
 
@@ -33,11 +34,13 @@ function fileIconFor(name: string) {
 
 export function UploadForm({
   roles,
+  departments,
   useClientUpload,
   uploadMaxMb,
   onUploadingChange,
 }: {
   roles: Role[];
+  departments: PickableDepartment[];
   useClientUpload: boolean;
   uploadMaxMb: number;
   // Fires true when a *single*-file upload starts and false once it fully
@@ -147,6 +150,7 @@ export function UploadForm({
         <SingleUpload
           file={files[0]}
           roles={roles}
+          departments={departments}
           useClientUpload={useClientUpload}
           uploadMaxMb={uploadMaxMb}
           onRemove={resetAll}
@@ -157,11 +161,12 @@ export function UploadForm({
         <BulkUploadPicker
           files={files}
           roles={roles}
+          departments={departments}
           uploadMaxMb={uploadMaxMb}
           onRemoveFile={(f) => setFiles((prev) => prev.filter((x) => x !== f))}
           onReset={resetAll}
-          onStart={(clearanceLevel, department, validFiles) => {
-            queue.start({ files: validFiles, clearanceLevel, department, useClientUpload });
+          onStart={(clearanceLevel, departmentIds, validFiles) => {
+            queue.start({ files: validFiles, clearanceLevel, departmentIds, useClientUpload });
             resetAll();
           }}
         />
@@ -175,6 +180,7 @@ type Status = 'idle' | 'invalid' | 'uploading' | 'PENDING' | 'PROCESSING' | 'REA
 function SingleUpload({
   file,
   roles,
+  departments,
   useClientUpload,
   uploadMaxMb,
   onRemove,
@@ -183,6 +189,7 @@ function SingleUpload({
 }: {
   file: File;
   roles: Role[];
+  departments: PickableDepartment[];
   useClientUpload: boolean;
   uploadMaxMb: number;
   onRemove: () => void;
@@ -192,7 +199,7 @@ function SingleUpload({
   const validationError = validateFile(file, uploadMaxMb);
   const [name, setName] = useState(stripExtension(file.name));
   const [description, setDescription] = useState('');
-  const [department, setDepartment] = useState('');
+  const [departmentIds, setDepartmentIds] = useState<string[]>([]);
   const [tags, setTags] = useState('');
   const [clearanceLevel, setClearanceLevel] = useState('');
   const [status, setStatus] = useState<Status>('idle');
@@ -211,7 +218,7 @@ function SingleUpload({
         name: name.trim() || stripExtension(file.name),
         description: description.trim() || undefined,
         clearanceLevel: Number(clearanceLevel),
-        department: department.trim() || undefined,
+        departmentIds,
         tags: tags
           .split(',')
           .map((t) => t.trim())
@@ -304,8 +311,13 @@ function SingleUpload({
           </Field>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Department (optional)">
-              <input name="department" value={department} onChange={(e) => setDepartment(e.target.value)} disabled={busy} className={inputClass} />
+            <Field label="Departments (optional)">
+              <DepartmentPicker
+                departments={departments}
+                selectedIds={departmentIds}
+                onChange={setDepartmentIds}
+                disabled={busy}
+              />
             </Field>
             <Field label="Tags (comma-separated)">
               <input name="tags" value={tags} onChange={(e) => setTags(e.target.value)} disabled={busy} className={inputClass} />
@@ -346,6 +358,7 @@ function SingleUpload({
 function BulkUploadPicker({
   files,
   roles,
+  departments,
   uploadMaxMb,
   onRemoveFile,
   onReset,
@@ -353,13 +366,14 @@ function BulkUploadPicker({
 }: {
   files: File[];
   roles: Role[];
+  departments: PickableDepartment[];
   uploadMaxMb: number;
   onRemoveFile: (file: File) => void;
   onReset: () => void;
-  onStart: (clearanceLevel: number, department: string | undefined, validFiles: File[]) => void;
+  onStart: (clearanceLevel: number, departmentIds: string[], validFiles: File[]) => void;
 }) {
   const [clearanceLevel, setClearanceLevel] = useState('');
-  const [department, setDepartment] = useState('');
+  const [departmentIds, setDepartmentIds] = useState<string[]>([]);
   const keyOf = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
 
   function statusFor(file: File): { status: Status; error?: string } {
@@ -432,13 +446,13 @@ function BulkUploadPicker({
           ))}
         </select>
       </Field>
-      <Field label="Department (optional, applies to all)">
-        <input name="department" value={department} onChange={(e) => setDepartment(e.target.value)} className={inputClass} />
+      <Field label="Departments (optional, applies to all)">
+        <DepartmentPicker departments={departments} selectedIds={departmentIds} onChange={setDepartmentIds} />
       </Field>
 
       <button
         type="button"
-        onClick={() => onStart(Number(clearanceLevel), department.trim() || undefined, validFiles)}
+        onClick={() => onStart(Number(clearanceLevel), departmentIds, validFiles)}
         disabled={!clearanceLevel || validFiles.length === 0}
         className="self-start rounded-lg bg-brand-700 dark:bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 dark:hover:bg-brand-500 disabled:opacity-60"
       >
