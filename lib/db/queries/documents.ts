@@ -213,3 +213,21 @@ export function listAccessibleDocumentSummaries(
     orderBy: { name: 'asc' },
   });
 }
+
+/**
+ * Every URL already ingested as a document — used by addDocumentFromUrlAction
+ * to seed a crawl's "already seen" set so it never re-fetches (and
+ * duplicates) a page that's already been added, whether from an earlier
+ * crawl, a plain single-URL add, or the same crawl request re-run later.
+ * Unfiltered by domain (this app's corpus is dozens-to-low-hundreds of
+ * documents, not worth a WHERE clause over) — the caller only checks
+ * membership, so a URL from a different site costing one extra Set entry
+ * is free.
+ */
+export async function listIngestedSourceUrls(): Promise<string[]> {
+  const rows = await prisma.document.findMany({
+    where: { sourceUrl: { not: null } },
+    select: { sourceUrl: true },
+  });
+  return rows.map((r) => r.sourceUrl!);
+}

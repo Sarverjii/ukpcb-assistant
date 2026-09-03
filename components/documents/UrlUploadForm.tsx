@@ -21,6 +21,7 @@ export function UrlUploadForm() {
   const [open, setOpen] = useState(false);
   const [url, setUrl] = useState('');
   const [crawl, setCrawl] = useState(false);
+  const [crawlDepth, setCrawlDepth] = useState('1');
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [doneCount, setDoneCount] = useState<number | null>(null);
@@ -28,6 +29,7 @@ export function UrlUploadForm() {
   function reset() {
     setUrl('');
     setCrawl(false);
+    setCrawlDepth('1');
     setError(null);
     setDoneCount(null);
   }
@@ -40,6 +42,7 @@ export function UrlUploadForm() {
     const formData = new FormData();
     formData.set('url', url.trim());
     formData.set('crawl', crawl ? 'true' : 'false');
+    formData.set('crawlDepth', crawlDepth);
     startTransition(async () => {
       const result = await addDocumentFromUrlAction(formData);
       if (result.error) {
@@ -92,10 +95,24 @@ export function UrlUploadForm() {
               className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-600 text-brand-600 focus:ring-brand-500"
             />
             <span className="text-zinc-700 dark:text-zinc-300">
-              Also fetch other pages linked from this one, on the same site (up to 3 total — run this
-              again from a different page, or add pages one at a time, to pull in more)
+              Also fetch other pages linked from this one, on the same site (up to 3 total — a page
+              already in the knowledge base is never fetched twice)
             </span>
           </label>
+          {crawl && (
+            <label className="ml-6 flex items-center gap-2 text-sm">
+              <span className="text-zinc-700 dark:text-zinc-300">Crawl depth</span>
+              <select
+                value={crawlDepth}
+                onChange={(e) => setCrawlDepth(e.target.value)}
+                className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-sm"
+              >
+                <option value="1">1 — pages linked directly from this one</option>
+                <option value="2">2 — and pages linked from those</option>
+                <option value="3">3 — and one hop further still</option>
+              </select>
+            </label>
+          )}
           <div>
             <button
               type="submit"

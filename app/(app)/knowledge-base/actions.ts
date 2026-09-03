@@ -12,6 +12,7 @@ import {
   updateDocumentDepartments,
   deleteDocument as deleteDocumentRow,
   updateDocumentFile,
+  listIngestedSourceUrls,
 } from '@/lib/db/queries/documents';
 import {
   deleteChunksForDocument,
@@ -292,7 +293,9 @@ export async function finalizeReplaceDocumentAction(
 // couple of the most important ones a human just linked you to," not a
 // full-site mirror — run "Add from a URL" again (with crawl checked)
 // from a different starting page, or add pages one at a time (crawl
-// off), to pull in more without hitting this ceiling.
+// off), to pull in more without hitting this ceiling. Applies regardless
+// of crawlDepth (below) — a deeper crawl just reaches further to try to
+// fill this same small quota, it doesn't raise it.
 const MAX_CRAWL_PAGES = 3;
 
 export type AddUrlResult = ActionResult & { pagesAdded?: number };
@@ -367,6 +370,13 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
 
   const url = String(formData.get('url') ?? '').trim();
   const crawl = formData.get('crawl') === 'true';
+  // How many link-hops out from the root page to follow — 1 means only
+  // pages linked directly from the root (the original behavior), higher
+  // values also follow links found on THOSE pages, and so on. Still
+  // bounded by MAX_CRAWL_PAGES regardless — depth changes how far the
+  // crawl is willing to reach to fill that same small quota, not how
+  // many pages it can end up fetching.
+  const crawlDepth = Math.min(Math.max(Number(formData.get('crawlDepth') ?? 1) || 1, 1), 3);
   if (!url) return { error: 'A URL is required.' };
 
   // Per explicit request: URL-sourced content is public to every employee
@@ -396,20 +406,43 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
 
   const documentIds = [await saveFetchedPageAsDocument(rootPage, url, clearanceLevel, ctx.userId)];
 
-  // Crawl mode: same-domain pages linked FROM the root page, fetched and
-  // added the same way, up to the cap above. A page that fails to fetch
-  // (dead link, blocked, non-HTML) is just skipped — one bad link
-  // shouldn't fail the whole crawl when most pages came through fine.
+  // Crawl mode: same-domain pages reachable from the root page within
+  // crawlDepth hops, fetched and added the same way, up to the cap
+  // above — a breadth-first walk, one "ring" of links at a time. `seen`
+  // is seeded from every URL already ingested as a document (any past
+  // crawl, or a plain single-URL add) so a page already in the
+  // knowledge base is never re-fetched and duplicated, and is then
+  // grown with every URL queued THIS run so a link cycle (two pages
+  // linking back to each other, or the same page linked from several
+  // others) can't cause it to be fetched twice either. A page that
+  // fails to fetch (dead link, blocked, non-HTML) is just skipped — one
+  // bad link shouldn't fail the whole crawl when most pages came through
+  // fine.
   if (crawl && rootPage.contentType === 'text/html') {
-    const links = discoverSameDomainLinks(rootPage.html, rootUrl).filter((l) => l !== url);
-    for (const link of links) {
-      if (documentIds.length >= MAX_CRAWL_PAGES) break;
-      try {
-        const linkedPage = await fetchUrlForIngestion(link);
-        documentIds.push(await saveFetchedPageAsDocument(linkedPage, link, clearanceLevel, ctx.userId));
-      } catch (err) {
-        console.warn('[documents] crawl skipped a page', link, err instanceof Error ? err.message : err);
+    const seen = new Set([url, ...(await listIngestedSourceUrls())]);
+    let frontier = discoverSameDomainLinks(rootPage.html, rootUrl).filter((l) => !seen.has(l));
+    for (const l of frontier) seen.add(l);
+
+    for (let hop = 0; hop < crawlDepth && frontier.length > 0 && documentIds.length < MAX_CRAWL_PAGES; hop++) {
+      const nextFrontier: string[] = [];
+      for (const link of frontier) {
+        if (documentIds.length >= MAX_CRAWL_PAGES) break;
+        try {
+          const linkedPage = await fetchUrlForIngestion(link);
+          documentIds.push(await saveFetchedPageAsDocument(linkedPage, link, clearanceLevel, ctx.userId));
+          if (linkedPage.contentType === 'text/html') {
+            for (const deeper of discoverSameDomainLinks(linkedPage.html, rootUrl)) {
+              if (!seen.has(deeper)) {
+                seen.add(deeper);
+                nextFrontier.push(deeper);
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('[documents] crawl skipped a page', link, err instanceof Error ? err.message : err);
+        }
       }
+      frontier = nextFrontier;
     }
   }
 
@@ -418,7 +451,7 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
     result: 'SUCCESS',
     userId: ctx.userId,
     resource: rootUrl.hostname,
-    metadata: { url, clearanceLevel, crawl, pagesAdded: documentIds.length },
+    metadata: { url, clearanceLevel, crawl, crawlDepth, pagesAdded: documentIds.length },
   });
 
   // See processDocumentsSequentially's own comment — one after() call
