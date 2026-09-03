@@ -404,22 +404,30 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
     throw err;
   }
 
-  const documentIds = [await saveFetchedPageAsDocument(rootPage, url, clearanceLevel, ctx.userId)];
+  // Checked once, reused for both the root URL itself and crawl
+  // discovery below — a page already in the knowledge base (this exact
+  // URL, from any past crawl or single-URL add) is never re-fetched and
+  // duplicated into a second document. The root still gets fetched live
+  // either way: crawl mode needs its current HTML to discover links from,
+  // even on a re-run where the root document itself already exists.
+  const existingUrls = await listIngestedSourceUrls();
+  const documentIds = existingUrls.includes(url)
+    ? []
+    : [await saveFetchedPageAsDocument(rootPage, url, clearanceLevel, ctx.userId)];
 
   // Crawl mode: same-domain pages reachable from the root page within
   // crawlDepth hops, fetched and added the same way, up to the cap
   // above — a breadth-first walk, one "ring" of links at a time. `seen`
-  // is seeded from every URL already ingested as a document (any past
-  // crawl, or a plain single-URL add) so a page already in the
-  // knowledge base is never re-fetched and duplicated, and is then
-  // grown with every URL queued THIS run so a link cycle (two pages
-  // linking back to each other, or the same page linked from several
-  // others) can't cause it to be fetched twice either. A page that
-  // fails to fetch (dead link, blocked, non-HTML) is just skipped — one
-  // bad link shouldn't fail the whole crawl when most pages came through
-  // fine.
+  // is seeded from every already-ingested URL (see above) so a page
+  // already in the knowledge base is never re-fetched and duplicated,
+  // and is then grown with every URL queued THIS run so a link cycle
+  // (two pages linking back to each other, or the same page linked from
+  // several others) can't cause it to be fetched twice either. A page
+  // that fails to fetch (dead link, blocked, non-HTML) is just skipped —
+  // one bad link shouldn't fail the whole crawl when most pages came
+  // through fine.
   if (crawl && rootPage.contentType === 'text/html') {
-    const seen = new Set([url, ...(await listIngestedSourceUrls())]);
+    const seen = new Set([url, ...existingUrls]);
     let frontier = discoverSameDomainLinks(rootPage.html, rootUrl).filter((l) => !seen.has(l));
     for (const l of frontier) seen.add(l);
 
@@ -444,6 +452,17 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
       }
       frontier = nextFrontier;
     }
+  }
+
+  // Nothing new to do — the root URL (and, in crawl mode, everything
+  // reachable from it) was already in the knowledge base. Not an error
+  // exactly, but there's genuinely no document to create or process.
+  if (documentIds.length === 0) {
+    return {
+      error: crawl
+        ? 'This page and everything crawlable from it are already in the knowledge base.'
+        : 'This page is already in the knowledge base.',
+    };
   }
 
   await logAuditEvent({
