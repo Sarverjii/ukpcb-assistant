@@ -12,8 +12,13 @@ import { getStorageProvider } from '@/lib/documents/storage';
  * Content-Disposition: attachment): any user cleared for the document
  * needs to reach this one, since a citation can surface to any employee
  * whose clearance covers it, not just admins. Authorization here is the
- * same rule as chunk retrieval — clearanceRank <= the document's level —
- * just checked against the document directly rather than a chunk.
+ * same rule as chunk retrieval — clearanceRank <= the document's level, OR
+ * the caller belongs to one of the document's departments — just checked
+ * against the document directly rather than a chunk. The department half
+ * was originally missing here (a real reported bug: an employee in a
+ * document's department got "Not authorized" even though the Document
+ * Library listing, which already had the department rule, showed it to
+ * them) — this route and every listing/retrieval path must always agree.
  */
 export async function GET(_request: Request, { params }: RouteContext<'/api/documents/[id]/view'>) {
   let ctx;
@@ -34,7 +39,9 @@ export async function GET(_request: Request, { params }: RouteContext<'/api/docu
     return NextResponse.json({ error: 'Document not found.' }, { status: 404 });
   }
 
-  if (ctx.clearanceRank < document.clearanceLevel) {
+  const hasClearance = ctx.clearanceRank >= document.clearanceLevel;
+  const hasDepartmentAccess = document.departments.some((d) => ctx.departmentIds.includes(d.id));
+  if (!hasClearance && !hasDepartmentAccess) {
     await logAuditEvent({
       action: 'ACCESS_DENIED',
       result: 'DENIED',

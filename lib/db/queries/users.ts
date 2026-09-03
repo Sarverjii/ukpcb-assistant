@@ -42,6 +42,29 @@ export function listAllActiveUsersForExport() {
   return listUsersWithRole();
 }
 
+/**
+ * Backs the Evon Directory — deliberately the narrowest possible shape:
+ * name, email, role name, and department names only. No status, no
+ * clearance rank, no provenance, nothing an ordinary employee shouldn't
+ * see about a colleague. Excludes DISABLED and REMOVED the same way
+ * listUsersWithRole does for the active roster, so the directory never
+ * surfaces someone who can't currently log in as if they were a normal
+ * colleague to reach out to.
+ */
+export function listDirectoryEntries() {
+  return prisma.user.findMany({
+    where: { status: 'ACTIVE' },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: { select: { name: true } },
+      departments: { select: { id: true, name: true } },
+    },
+    orderBy: { name: 'asc' },
+  });
+}
+
 export function listRolesByRank() {
   return prisma.role.findMany({ orderBy: { hierarchyRank: 'desc' } });
 }

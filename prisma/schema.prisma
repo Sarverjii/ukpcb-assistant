@@ -137,13 +137,14 @@ model User {
   createdAt       DateTime             @default(now())
   lastLoginAt     DateTime?
 
-  accounts        Account[]
-  sessions        Session[]
-  loginSessions   LoginSession[]
-  documents       Document[]            @relation("UploadedBy")
-  conversations   Conversation[]
-  auditLogs       AuditLog[]
-  importedBatches EmployeeImportBatch[] @relation("ImportedBy")
+  accounts          Account[]
+  sessions          Session[]
+  loginSessions     LoginSession[]
+  documents         Document[]            @relation("UploadedBy")
+  conversations     Conversation[]
+  auditLogs         AuditLog[]
+  importedBatches   EmployeeImportBatch[] @relation("ImportedBy")
+  headOfDepartments Department[]          @relation("DepartmentHead")
 
   @@index([roleId])
   @@index([createdById])
@@ -185,9 +186,21 @@ model EmployeeImportBatch {
 // which also can't be deleted — only added/renamed/reordered), so nothing
 // in this app ever needs to handle "a document's department disappeared".
 model Department {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  name        String   @unique
+  // Short blurb shown on the Departments admin page and the Evon
+  // Directory — purely descriptive, never authorization-relevant.
+  description String?
+  // The department's designated lead — optional, and deliberately NOT a
+  // capability or clearance boost of any kind (a head has exactly the
+  // access their own Role and department memberships already grant, same
+  // as any other member). Purely an org-chart label surfaced on both the
+  // Departments admin page and the Evon Directory. SetNull if that
+  // employee is later hard-deleted, mirroring every other "survives with
+  // a cleared reference" pattern in this schema.
+  headUserId  String?
+  head        User?    @relation("DepartmentHead", fields: [headUserId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
 
   users     User[]
   documents Document[]

@@ -13,6 +13,21 @@ export function listDepartments() {
   return prisma.department.findMany({ orderBy: { name: 'asc' } });
 }
 
+/**
+ * Backs the admin Departments overview (card grid): name, description,
+ * head, and member/document counts in one query — everything the list
+ * view needs without a detail-page round trip per card.
+ */
+export function listDepartmentsWithStats() {
+  return prisma.department.findMany({
+    include: {
+      head: { select: { id: true, name: true, email: true } },
+      _count: { select: { users: { where: { status: { not: 'REMOVED' } } }, documents: true } },
+    },
+    orderBy: { name: 'asc' },
+  });
+}
+
 export function getDepartmentById(id: string) {
   return prisma.department.findUniqueOrThrow({ where: { id } });
 }
@@ -28,15 +43,24 @@ export function createDepartment(name: string) {
   return prisma.department.create({ data: { name } });
 }
 
-export function renameDepartment(id: string, name: string) {
-  return prisma.department.update({ where: { id }, data: { name } });
+/**
+ * Single update path for everything editable on a department's detail
+ * page — name, description, and head — so the UI can save any subset of
+ * these in one round trip instead of three separate actions.
+ */
+export function updateDepartment(
+  id: string,
+  data: { name?: string; description?: string | null; headUserId?: string | null },
+) {
+  return prisma.department.update({ where: { id }, data });
 }
 
-/** A department's current members, for the department detail/membership page. */
+/** A department's current members and head, for the detail/membership page. */
 export function getDepartmentWithMembers(id: string) {
   return prisma.department.findUniqueOrThrow({
     where: { id },
     include: {
+      head: { select: { id: true, name: true, email: true } },
       users: {
         where: { status: { not: 'REMOVED' } },
         include: { role: true },

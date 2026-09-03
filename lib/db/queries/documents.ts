@@ -88,6 +88,19 @@ export function listDocumentsWithUploader(maxClearanceRank?: number) {
  * set to null once the employee is hard-deleted) or delete it via the
  * existing deleteDocumentAction before that happens.
  */
+/**
+ * Every READY document tagged with a specific department — backs the
+ * Departments admin detail page, so an admin managing a department can see
+ * what it actually grants access to, not just who's in it.
+ */
+export function listDocumentsForDepartment(departmentId: string) {
+  return prisma.document.findMany({
+    where: { departments: { some: { id: departmentId } }, status: 'READY' },
+    select: { id: true, name: true, clearanceLevel: true },
+    orderBy: { name: 'asc' },
+  });
+}
+
 export function listDocumentsByUploader(uploadedById: string) {
   return prisma.document.findMany({
     where: { uploadedById },
