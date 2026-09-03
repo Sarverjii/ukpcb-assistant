@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { UploadForm } from '@/components/documents/UploadForm';
+import { UrlUploadForm } from '@/components/documents/UrlUploadForm';
+import { WebsiteGroups } from '@/components/documents/WebsiteGroups';
 import { DocumentsTable, type DocumentRow } from '@/components/documents/DocumentsTable';
 import { useUploadQueue } from '@/components/documents/UploadQueueContext';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
@@ -71,7 +73,12 @@ export function KnowledgeBase({
             onUploadingChange={setSingleUploading}
           />
         </div>
+        <div className="mt-3">
+          <UrlUploadForm roles={roles} />
+        </div>
       </section>
+
+      <WebsiteGroups documents={documents} />
 
       <section>
         <div className="flex items-center justify-between">

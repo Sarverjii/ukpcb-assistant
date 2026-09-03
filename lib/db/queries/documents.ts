@@ -11,6 +11,9 @@ export type CreateDocumentInput = {
   departmentIds?: string[];
   tags?: string[];
   uploadedById: string;
+  // Set only by addDocumentFromUrlAction — see Document.sourceUrl's own
+  // comment.
+  sourceUrl?: string;
 };
 
 export function createDocument(input: CreateDocumentInput) {
@@ -25,6 +28,7 @@ export function createDocument(input: CreateDocumentInput) {
       departments: input.departmentIds?.length ? { connect: input.departmentIds.map((id) => ({ id })) } : undefined,
       tags: input.tags ?? [],
       uploadedById: input.uploadedById,
+      sourceUrl: input.sourceUrl,
       status: 'PENDING',
     },
   });

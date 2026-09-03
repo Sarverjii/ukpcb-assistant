@@ -9,6 +9,7 @@ import {
   replaceDocumentAction,
   finalizeReplaceDocumentAction,
 } from '@/app/(app)/knowledge-base/actions';
+import { Link2 } from 'lucide-react';
 import { LocalTime } from '@/components/admin/LocalTime';
 import { ACCEPTED_EXTENSIONS } from '@/lib/documents/uploadClient';
 import { DepartmentCheckboxList } from '@/components/shared/DepartmentCheckboxList';
@@ -23,6 +24,9 @@ export type DocumentRow = {
   status: 'PENDING' | 'PROCESSING' | 'READY' | 'FAILED';
   createdAt: string;
   updatedAt: string;
+  // Set only for a document added by pasting a URL — see
+  // addDocumentFromUrlAction's own comment.
+  sourceUrl: string | null;
 };
 type Role = { hierarchyRank: number; name: string };
 
@@ -235,7 +239,20 @@ function DocumentRow({
 
   return (
     <tr className="border-t border-zinc-100 dark:border-zinc-800 align-top">
-      <td className="px-3 py-2">{doc.name}</td>
+      <td className="px-3 py-2">
+        {doc.name}
+        {doc.sourceUrl && (
+          <a
+            href={doc.sourceUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={doc.sourceUrl}
+            className="ml-1.5 inline-flex items-center align-middle text-zinc-400 hover:text-brand-600"
+          >
+            <Link2 size={12} />
+          </a>
+        )}
+      </td>
       <td className="px-3 py-2">{doc.uploadedByName}</td>
       <td className="px-3 py-2">
         <select

@@ -44,6 +44,11 @@ export function describeAuditEvent(
       const name = str(m.name);
       return name ? `Uploaded document "${name}" at ${roleName(m.clearanceLevel)} clearance` : 'Uploaded a document';
     }
+    case 'DOCUMENT_ADDED_FROM_URL': {
+      const name = str(m.name);
+      const url = str(m.url);
+      return name ? `Added "${name}" from ${url ?? 'a URL'} at ${roleName(m.clearanceLevel)} clearance` : 'Added a document from a URL';
+    }
     case 'DOCUMENT_PROCESSED': {
       const count = num(m.chunkCount);
       const error = str(m.error);

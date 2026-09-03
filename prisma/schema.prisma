@@ -263,6 +263,13 @@ model Document {
   fileKey         String
   mimeType        String
   fileSizeBytes   Int
+  // Set only for a document added by pasting a URL (see
+  // lib/documents/urlFetch.ts) rather than uploading a file — the fetched
+  // page's own address, kept for traceability (shown in the Knowledge
+  // Base table so an admin can tell at a glance this content came from
+  // the web, not from someone's machine) and as the anchor for a future
+  // "re-fetch" action. Null for every ordinary file upload.
+  sourceUrl       String?
   // Storage key of a generated, clean PDF rendition — set only for a
   // non-PDF original (DOCX/PPTX/TXT/MD), null for a document that's
   // already a PDF (fileKey IS the viewable file there, nothing to
