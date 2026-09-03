@@ -33,17 +33,27 @@ export async function createRole(name: string) {
  * app has shipped with a real role permanently parked at hierarchyRank
  * -1 ("Associate"). Swapping that role (or anything adjacent to it once
  * another role also sits at -1) with the old hardcoded temp collided with
- * it immediately and threw. Using a temp value from the current
- * timestamp instead — a real rank landing on this exact number is not a
- * realistic concern — avoids the whole class of collision regardless of
- * how far into negative territory real ranks go.
+ * it immediately and threw.
+ *
+ * A prior fix here used -Date.now() as the temp value, reasoning a real
+ * rank would never collide with a millisecond timestamp — true, but it
+ * missed that hierarchyRank is a 32-bit Postgres Int (max ~2.1 billion in
+ * either direction), and Date.now() in milliseconds has exceeded that
+ * magnitude for years, so the "safe" temp value itself overflowed the
+ * column and threw a *different* error (confirmed directly: a real
+ * "server error" on this exact action in production). Computing the temp
+ * value from the actual current data instead — one less than whatever the
+ * lowest real rank is right now — costs one extra query but is
+ * mechanically guaranteed to both avoid every real rank and stay well
+ * within Int4 range for any realistic hierarchy.
  */
 export async function swapRoleRanks(roleAId: string, roleBId: string) {
-  const [a, b] = await Promise.all([
+  const [a, b, lowest] = await Promise.all([
     prisma.role.findUniqueOrThrow({ where: { id: roleAId } }),
     prisma.role.findUniqueOrThrow({ where: { id: roleBId } }),
+    prisma.role.findFirst({ orderBy: { hierarchyRank: 'asc' } }),
   ]);
-  const temp = -Date.now();
+  const temp = (lowest?.hierarchyRank ?? 0) - 1;
 
   await prisma.$transaction([
     prisma.role.update({ where: { id: a.id }, data: { hierarchyRank: temp } }),
