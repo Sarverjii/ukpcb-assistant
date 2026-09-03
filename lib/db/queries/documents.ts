@@ -116,11 +116,12 @@ export function listDocumentsByUploader(uploadedById: string) {
  * built for the RAG document-inventory prompt, not a browsing UI).
  * Deliberately never takes an isAdmin bypass — every viewer, admin
  * included, sees only what their own clearanceRank/departments allow here.
- * `userDepartmentIds` extends visibility additively — a document is shown
- * if EITHER the clearance check passes OR the viewer shares a department
- * with the document, OR the viewer has head-department access and the
- * document has any department at all — mirroring the SQL-level rule in
- * lib/db/queries/chunks.ts.
+ * Clearance is a hard requirement (`clearanceLevel: { lte: userClearanceRank }`
+ * at the top level, not inside the OR): a document is shown only if the
+ * clearance check passes AND (it has no department at all, OR the viewer
+ * shares a department with it, OR the viewer has head-department access) —
+ * mirroring the SQL-level rule in lib/db/queries/chunks.ts. A department
+ * only ever narrows who a clearance level already admits, never widens it.
  */
 export function listAccessibleDocumentSummariesForBrowsing(
   userClearanceRank: number,
@@ -130,8 +131,9 @@ export function listAccessibleDocumentSummariesForBrowsing(
   return prisma.document.findMany({
     where: {
       status: 'READY',
+      clearanceLevel: { lte: userClearanceRank },
       OR: [
-        { clearanceLevel: { lte: userClearanceRank } },
+        { departments: { none: {} } },
         { departments: { some: { id: { in: userDepartmentIds } } } },
         ...(hasHeadDepartmentAccess ? [{ departments: { some: {} } }] : []),
       ],
@@ -181,7 +183,8 @@ export function updateDocumentFile(
  * not a relaxation of the content-retrieval boundary. See
  * lib/rag/chat.ts::answerQuestion for how the two are kept separate in the
  * prompt the model actually sees. `userDepartmentIds`/`hasHeadDepartmentAccess`
- * extend this the same additive way as listAccessibleDocumentSummariesForBrowsing above.
+ * enforce the same clearance-AND-department rule as
+ * listAccessibleDocumentSummariesForBrowsing above.
  */
 export function listAccessibleDocumentSummaries(
   userClearanceRank: number,
@@ -191,8 +194,9 @@ export function listAccessibleDocumentSummaries(
   return prisma.document.findMany({
     where: {
       status: 'READY',
+      clearanceLevel: { lte: userClearanceRank },
       OR: [
-        { clearanceLevel: { lte: userClearanceRank } },
+        { departments: { none: {} } },
         { departments: { some: { id: { in: userDepartmentIds } } } },
         ...(hasHeadDepartmentAccess ? [{ departments: { some: {} } }] : []),
       ],

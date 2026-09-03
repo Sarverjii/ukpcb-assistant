@@ -11,7 +11,8 @@ import {
 } from '@/app/(app)/knowledge-base/actions';
 import { LocalTime } from '@/components/admin/LocalTime';
 import { ACCEPTED_EXTENSIONS } from '@/lib/documents/uploadClient';
-import { DepartmentPicker, type PickableDepartment } from '@/components/shared/DepartmentPicker';
+import { DepartmentCheckboxList } from '@/components/shared/DepartmentCheckboxList';
+import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
 
 export type DocumentRow = {
   id: string;
@@ -250,13 +251,12 @@ function DocumentRow({
           ))}
         </select>
       </td>
-      <td className="px-3 py-2 min-w-[10rem]">
-        <DepartmentPicker
+      <td className="px-3 py-2 min-w-[16rem]">
+        <DepartmentCheckboxList
           departments={departments}
           selectedIds={departmentIds}
           onChange={handleDepartmentsChange}
           disabled={pending}
-          placeholder="—"
         />
       </td>
       <td className="px-3 py-2">

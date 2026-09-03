@@ -12,15 +12,14 @@ import { getStorageProvider } from '@/lib/documents/storage';
  * Content-Disposition: attachment): any user cleared for the document
  * needs to reach this one, since a citation can surface to any employee
  * whose clearance covers it, not just admins. Authorization here is the
- * same rule as chunk retrieval — clearanceRank <= the document's level, OR
- * the caller belongs to one of the document's departments, OR the caller
- * has head-department access and the document has any department at all
- * (see Department.isHeadDepartment) — just checked against the document
- * directly rather than a chunk. The department half was originally missing
- * here (a real reported bug: an employee in a document's department got
- * "Not authorized" even though the Document Library listing, which already
- * had the department rule, showed it to
- * them) — this route and every listing/retrieval path must always agree.
+ * same rule as chunk retrieval — clearanceRank <= the document's level, AND
+ * (the document has no department at all, OR the caller belongs to one of
+ * its departments, OR the caller has head-department access) — just
+ * checked against the document directly rather than a chunk. Clearance is
+ * a hard requirement; department only ever narrows, never widens, who a
+ * clearance level already admits. This route and every listing/retrieval
+ * path must always agree — a real reported bug once had this route
+ * missing the department half entirely.
  */
 export async function GET(_request: Request, { params }: RouteContext<'/api/documents/[id]/view'>) {
   let ctx;
@@ -42,9 +41,11 @@ export async function GET(_request: Request, { params }: RouteContext<'/api/docu
   }
 
   const hasClearance = ctx.clearanceRank >= document.clearanceLevel;
-  const hasDepartmentAccess = document.departments.some((d) => ctx.departmentIds.includes(d.id));
-  const hasHeadDepartmentAccess = ctx.hasHeadDepartmentAccess && document.departments.length > 0;
-  if (!hasClearance && !hasDepartmentAccess && !hasHeadDepartmentAccess) {
+  const departmentOk =
+    document.departments.length === 0 ||
+    document.departments.some((d) => ctx.departmentIds.includes(d.id)) ||
+    ctx.hasHeadDepartmentAccess;
+  if (!hasClearance || !departmentOk) {
     await logAuditEvent({
       action: 'ACCESS_DENIED',
       result: 'DENIED',

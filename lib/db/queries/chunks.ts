@@ -26,19 +26,25 @@ export type RetrievedChunk = {
  * LLM. Do not "fetch then filter in JS" this query; that would be the
  * insufficient pattern the spec explicitly calls out.
  *
- * A chunk is authorized if the caller's clearance rank covers it, OR the
- * caller belongs to at least one of the chunk's (denormalized) departments
- * — the additive department-visibility rule (e.g. a document at
- * "President" clearance tagged "HR" is visible to President-and-above AND
- * to every HR employee regardless of their own rank) — OR the caller
- * belongs to a "head department" (see Department.isHeadDepartment) and the
- * chunk has ANY department at all. `dc."departmentIds" && userDepartmentIds`
- * is Postgres's array-overlap operator; `cardinality(dc."departmentIds") > 0`
- * is true only for a chunk with at least one department (a head-department
- * member gets no special access to a departmentless chunk — that stays
- * gated on clearance alone, same as for anyone else). An empty
- * `userDepartmentIds` array and `hasHeadDepartmentAccess: false` both
- * correctly fall back to pure clearance with no special-casing needed.
+ * A chunk is authorized if the caller's clearance rank covers it AND
+ * (either the chunk has no department at all, OR the caller belongs to at
+ * least one of the chunk's (denormalized) departments, OR the caller
+ * belongs to a "head department" — see Department.isHeadDepartment, which
+ * counts as membership in every department for this check, clearance
+ * still required either way). Clearance is a hard requirement, not one
+ * branch of an OR: a document set to "VP" clearance and "HR" department is
+ * visible ONLY to someone who is BOTH VP-or-above AND in HR — not to every
+ * VP+ employee regardless of department, and not to every HR employee
+ * regardless of clearance. A document with NO department at all is
+ * governed by clearance alone, exactly as if departments didn't exist —
+ * the department condition only ever narrows, never widens, who a
+ * clearance level already admits.
+ *
+ * `dc."departmentIds" && userDepartmentIds` is Postgres's array-overlap
+ * operator; `cardinality(dc."departmentIds") = 0` is true only for a
+ * chunk with no department. An empty `userDepartmentIds` array and
+ * `hasHeadDepartmentAccess: false` both correctly fall back to pure
+ * clearance with no special-casing needed.
  *
  * `userClearanceRank`/`userDepartmentIds`/`hasHeadDepartmentAccess` MUST
  * come from a server-side, DB-verified session (see
@@ -68,10 +74,11 @@ export async function retrieveAuthorizedChunks(
       1 - (dc.embedding <=> ${vec}::vector) AS similarity
     FROM "DocumentChunk" dc
     JOIN "Document" d ON d.id = dc."documentId"
-    WHERE (
-        dc."clearanceRank" <= ${userClearanceRank}
+    WHERE dc."clearanceRank" <= ${userClearanceRank}
+      AND (
+        cardinality(dc."departmentIds") = 0
         OR dc."departmentIds" && ${userDepartmentIds}::text[]
-        OR (${hasHeadDepartmentAccess} AND cardinality(dc."departmentIds") > 0)
+        OR ${hasHeadDepartmentAccess}
       )
       AND d.status = 'READY'
     ORDER BY dc.embedding <=> ${vec}::vector
@@ -84,7 +91,7 @@ export async function retrieveAuthorizedChunks(
  * already-authorized answer and expects to see the actual cited text. The
  * chunk's id alone (stored on the Message row) isn't proof of current
  * authorization — clearance can change after a message was sent — so this
- * re-checks clearance-or-department at read time, same as every other
+ * re-checks clearance-and-department at read time, same as every other
  * chunk access in this app, rather than trusting that a chunk id showing
  * up in a citation once means it's still safe to show now.
  */
@@ -122,10 +129,11 @@ export async function getChunkForUser(
     FROM "DocumentChunk" dc
     JOIN "Document" d ON d.id = dc."documentId"
     WHERE dc.id = ${chunkId}
+      AND dc."clearanceRank" <= ${userClearanceRank}
       AND (
-        dc."clearanceRank" <= ${userClearanceRank}
+        cardinality(dc."departmentIds") = 0
         OR dc."departmentIds" && ${userDepartmentIds}::text[]
-        OR (${hasHeadDepartmentAccess} AND cardinality(dc."departmentIds") > 0)
+        OR ${hasHeadDepartmentAccess}
       )
     LIMIT 1
   `;
@@ -139,8 +147,8 @@ export async function getChunkForUser(
  * chunks happen to score poorly on cosine similarity (see that module's
  * doc comment for the measured failure mode this exists to cover).
  *
- * SAME clearance-or-department filter as retrieveAuthorizedChunks — this is
- * not a separate, weaker code path. `documentIds` merely narrows WHICH
+ * SAME clearance-and-department filter as retrieveAuthorizedChunks — this
+ * is not a separate, weaker code path. `documentIds` merely narrows WHICH
  * documents to look in; it does not bypass the authorization check for any
  * of them.
  *
@@ -173,10 +181,11 @@ export async function retrieveChunksForDocuments(
         ) AS rank
       FROM "DocumentChunk" dc
       JOIN "Document" d ON d.id = dc."documentId"
-      WHERE (
-          dc."clearanceRank" <= ${userClearanceRank}
+      WHERE dc."clearanceRank" <= ${userClearanceRank}
+        AND (
+          cardinality(dc."departmentIds") = 0
           OR dc."departmentIds" && ${userDepartmentIds}::text[]
-          OR (${hasHeadDepartmentAccess} AND cardinality(dc."departmentIds") > 0)
+          OR ${hasHeadDepartmentAccess}
         )
         AND d.status = 'READY'
         AND dc."documentId" = ANY(${documentIds}::text[])

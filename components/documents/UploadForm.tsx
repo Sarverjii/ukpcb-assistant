@@ -20,7 +20,8 @@ import {
   validateFile,
 } from '@/lib/documents/uploadClient';
 import { useUploadQueue, type QueueItem } from '@/components/documents/UploadQueueContext';
-import { DepartmentPicker, type PickableDepartment } from '@/components/shared/DepartmentPicker';
+import { DepartmentCheckboxList } from '@/components/shared/DepartmentCheckboxList';
+import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
 
 type Role = { name: string; hierarchyRank: number };
 
@@ -199,7 +200,10 @@ function SingleUpload({
   const validationError = validateFile(file, uploadMaxMb);
   const [name, setName] = useState(stripExtension(file.name));
   const [description, setDescription] = useState('');
-  const [departmentIds, setDepartmentIds] = useState<string[]>([]);
+  // Every department checked by default — the common case is a document
+  // meant for everyone; an uploader narrows it down rather than having to
+  // remember to opt every department in.
+  const [departmentIds, setDepartmentIds] = useState<string[]>(() => departments.map((d) => d.id));
   const [tags, setTags] = useState('');
   const [clearanceLevel, setClearanceLevel] = useState('');
   const [status, setStatus] = useState<Status>('idle');
@@ -310,19 +314,18 @@ function SingleUpload({
             </select>
           </Field>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="Departments (optional)">
-              <DepartmentPicker
-                departments={departments}
-                selectedIds={departmentIds}
-                onChange={setDepartmentIds}
-                disabled={busy}
-              />
-            </Field>
-            <Field label="Tags (comma-separated)">
-              <input name="tags" value={tags} onChange={(e) => setTags(e.target.value)} disabled={busy} className={inputClass} />
-            </Field>
-          </div>
+          <Field label="Departments">
+            <DepartmentCheckboxList
+              departments={departments}
+              selectedIds={departmentIds}
+              onChange={setDepartmentIds}
+              disabled={busy}
+            />
+          </Field>
+
+          <Field label="Tags (comma-separated)">
+            <input name="tags" value={tags} onChange={(e) => setTags(e.target.value)} disabled={busy} className={inputClass} />
+          </Field>
         </>
       )}
 
@@ -373,7 +376,8 @@ function BulkUploadPicker({
   onStart: (clearanceLevel: number, departmentIds: string[], validFiles: File[]) => void;
 }) {
   const [clearanceLevel, setClearanceLevel] = useState('');
-  const [departmentIds, setDepartmentIds] = useState<string[]>([]);
+  // Every department checked by default — see SingleUpload's matching comment.
+  const [departmentIds, setDepartmentIds] = useState<string[]>(() => departments.map((d) => d.id));
   const keyOf = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
 
   function statusFor(file: File): { status: Status; error?: string } {
@@ -446,8 +450,8 @@ function BulkUploadPicker({
           ))}
         </select>
       </Field>
-      <Field label="Departments (optional, applies to all)">
-        <DepartmentPicker departments={departments} selectedIds={departmentIds} onChange={setDepartmentIds} />
+      <Field label="Departments (applies to all files in this batch)">
+        <DepartmentCheckboxList departments={departments} selectedIds={departmentIds} onChange={setDepartmentIds} />
       </Field>
 
       <button

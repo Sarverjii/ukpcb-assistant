@@ -135,57 +135,74 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
     expect(asCxo.every((c) => c.matchedByDocumentName)).toBe(true);
   });
 
-  it('a head-department member sees a document tagged with a DIFFERENT department, but gets no special access to a departmentless document', async () => {
+  it('clearance and department are an intersection (AND), not alternatives (OR) — both are required for a tagged document', async () => {
     // Sets up its own temporary Department rows and tags/untags the
     // fixture's own CXO-only "Board Merger Plans" document for the
     // duration of this test only — reverted in `finally` so this doesn't
     // leak state into any other test.
+    const deptA = await prisma.department.create({ data: { name: `Test Dept A ${Date.now()}` } });
     const headDept = await prisma.department.create({
       data: { name: `Test Head Dept ${Date.now()}`, isHeadDepartment: true },
-    });
-    const otherDept = await prisma.department.create({
-      data: { name: `Test Other Dept ${Date.now()}` },
     });
 
     const boardMergerDoc = await prisma.document.findFirstOrThrow({ where: { name: 'Board Merger Plans' } });
     const engineer = await prisma.user.findFirstOrThrow({ where: { email: 'engineer@asktest.local' } });
+    const engineerRank = (await prisma.role.findUniqueOrThrow({ where: { id: engineer.roleId } })).hierarchyRank;
+    const cxoCtx = await authContextFor('cxo@asktest.local');
 
     try {
-      // Tag the CXO-only document with the OTHER (non-head) department —
-      // the head-department rule must grant access to it purely because
-      // it has *some* department, without the caller needing to share
-      // that specific department.
-      await prisma.document.update({ where: { id: boardMergerDoc.id }, data: { departments: { connect: { id: otherDept.id } } } });
-      await prisma.documentChunk.updateMany({ where: { documentId: boardMergerDoc.id }, data: { departmentIds: [otherDept.id] } });
+      // Tag the CXO-only document with deptA — clearance stays CXO-only,
+      // department is now deptA.
+      await prisma.document.update({ where: { id: boardMergerDoc.id }, data: { departments: { connect: { id: deptA.id } } } });
+      await prisma.documentChunk.updateMany({ where: { documentId: boardMergerDoc.id }, data: { departmentIds: [deptA.id] } });
 
       const embedder = await getEmbeddingProvider();
       const [embedding] = await embedder.embed(['Northwind acquisition due diligence'], 'RETRIEVAL_QUERY');
-      const engineerRank = (await prisma.role.findUniqueOrThrow({ where: { id: engineer.roleId } })).hierarchyRank;
 
-      // A low-clearance user in ONLY the head department (not otherDept)
-      // must still see it.
-      const asHeadDeptMember = await retrieveAuthorizedChunks(embedding, engineerRank, [headDept.id], true, 10);
-      expect(asHeadDeptMember.some((c) => c.documentName === 'Board Merger Plans')).toBe(true);
+      // Sufficient clearance (CXO) AND matching department (deptA) -> sees it.
+      const cxoInDeptA = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [deptA.id], false, 10);
+      expect(cxoInDeptA.some((c) => c.documentName === 'Board Merger Plans')).toBe(true);
 
-      // The exact same low clearance, WITHOUT head-department access, must
-      // still be refused — proves this is additive, not a general
-      // clearance bypass tied to the rank alone.
-      const withoutHeadAccess = await retrieveAuthorizedChunks(embedding, engineerRank, [], false, 10);
-      expect(withoutHeadAccess.some((c) => c.documentName === 'Board Merger Plans')).toBe(false);
+      // Sufficient clearance (CXO) but NOT in deptA, no head-department ->
+      // department condition fails, so access is refused despite ample
+      // clearance. This is the actual behavior change: clearance alone
+      // used to be enough, and no longer is once a document has a
+      // department.
+      const cxoNotInDeptA = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [], false, 10);
+      expect(cxoNotInDeptA.some((c) => c.documentName === 'Board Merger Plans')).toBe(false);
 
-      // Now strip the document back to NO department at all — a
-      // head-department member must NOT get access to a departmentless
-      // document just from clearance-independent head status.
+      // Sufficient clearance (CXO) + head-department access (not deptA
+      // itself) -> head-department membership counts as matching every
+      // department, so this still passes.
+      const cxoWithHeadAccess = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [headDept.id], true, 10);
+      expect(cxoWithHeadAccess.some((c) => c.documentName === 'Board Merger Plans')).toBe(true);
+
+      // INSUFFICIENT clearance (engineer, the lowest seeded rank) but IN
+      // deptA -> department matches, but clearance does not, so access is
+      // still refused. Proves department membership never widens what
+      // clearance alone would admit.
+      const engineerInDeptA = await retrieveAuthorizedChunks(embedding, engineerRank, [deptA.id], false, 10);
+      expect(engineerInDeptA.some((c) => c.documentName === 'Board Merger Plans')).toBe(false);
+
+      // INSUFFICIENT clearance + head-department access -> still refused;
+      // head-department status only ever satisfies the department half of
+      // the check, never the clearance half.
+      const engineerWithHeadAccess = await retrieveAuthorizedChunks(embedding, engineerRank, [headDept.id], true, 10);
+      expect(engineerWithHeadAccess.some((c) => c.documentName === 'Board Merger Plans')).toBe(false);
+
+      // Now strip the document back to NO department at all — pure
+      // clearance governs again, exactly as if departments never existed:
+      // CXO sees it, with no department or head-department status needed.
       await prisma.documentChunk.updateMany({ where: { documentId: boardMergerDoc.id }, data: { departmentIds: [] } });
-      const afterUndeparted = await retrieveAuthorizedChunks(embedding, engineerRank, [headDept.id], true, 10);
-      expect(afterUndeparted.some((c) => c.documentName === 'Board Merger Plans')).toBe(false);
+      const cxoOnDepartmentless = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [], false, 10);
+      expect(cxoOnDepartmentless.some((c) => c.documentName === 'Board Merger Plans')).toBe(true);
     } finally {
       // Revert the fixture document to its original, departmentless state
       // and remove the temporary departments entirely.
       await prisma.documentChunk.updateMany({ where: { documentId: boardMergerDoc.id }, data: { departmentIds: [] } });
       await prisma.document.update({ where: { id: boardMergerDoc.id }, data: { departments: { set: [] } } });
+      await prisma.department.delete({ where: { id: deptA.id } });
       await prisma.department.delete({ where: { id: headDept.id } });
-      await prisma.department.delete({ where: { id: otherDept.id } });
     }
   });
 });
