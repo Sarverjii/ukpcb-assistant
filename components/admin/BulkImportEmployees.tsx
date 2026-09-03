@@ -86,7 +86,7 @@ export function BulkImportEmployees({ roles, batches }: { roles: Role[]; batches
             type="file"
             accept=".csv,.xlsx"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="text-sm"
+            className="text-sm text-zinc-600 dark:text-zinc-300 file:mr-3 file:rounded-md file:border file:border-zinc-300 dark:file:border-zinc-700 file:bg-white dark:file:bg-zinc-800 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-zinc-700 dark:file:text-zinc-200 hover:file:bg-zinc-50 dark:hover:file:bg-zinc-700 file:cursor-pointer"
           />
           <div>
             <button
