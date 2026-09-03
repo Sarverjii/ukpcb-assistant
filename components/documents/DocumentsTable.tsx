@@ -251,7 +251,7 @@ function DocumentRow({
           ))}
         </select>
       </td>
-      <td className="px-3 py-2 min-w-[16rem]">
+      <td className="px-3 py-2 min-w-[26rem]">
         <DepartmentCheckboxList
           departments={departments}
           selectedIds={departmentIds}

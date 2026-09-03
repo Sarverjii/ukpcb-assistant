@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Search, Mail, Users, Crown } from 'lucide-react';
+import { Search, Mail, Crown } from 'lucide-react';
 
 export type DirectoryPerson = {
   id: string;
@@ -16,11 +16,12 @@ export type DirectoryPerson = {
  * employee (see the page's own gating comment). Two modes, switched
  * purely by whether the search box has anything in it:
  *
- *  - Empty search: "Your department(s)" first (what the user asked for
- *    explicitly — land on your own people before anything else), then
- *    every department as its own collapsible group underneath, so
- *    browsing the whole company is one click away without leaving the
- *    page.
+ *  - Empty search: every department as its own collapsible group,
+ *    department name + head shown up front, membership revealed only on
+ *    click — deliberately NOT pre-expanded and deliberately NOT leading
+ *    with the viewer's own department(s) (an earlier version did both;
+ *    removed per explicit feedback that browsing should start from the
+ *    full department list, not the viewer's own membership).
  *  - Non-empty search: a flat, ranked list of every matching person
  *    across the whole company (name, email, or department), regardless
  *    of department — the fast path once you know roughly who you're
@@ -35,7 +36,6 @@ export function EvonDirectory({
   people,
   departmentHeads,
   viewerId,
-  viewerDepartmentIds,
 }: {
   people: DirectoryPerson[];
   // Department name -> head's name, for the small "Headed by" line on
@@ -43,7 +43,6 @@ export function EvonDirectory({
   // the person-grouping already uses as its key.
   departmentHeads: Record<string, string>;
   viewerId: string;
-  viewerDepartmentIds: string[];
 }) {
   const [query, setQuery] = useState('');
   const q = query.trim().toLowerCase();
@@ -58,10 +57,6 @@ export function EvonDirectory({
         p.departments.some((d) => d.name.toLowerCase().includes(q)),
     );
   }, [people, q]);
-
-  const myDepartmentSet = new Set(viewerDepartmentIds);
-  const myColleagues = people.filter((p) => p.departments.some((d) => myDepartmentSet.has(d.id)));
-  const myDepartments = people.find((p) => p.id === viewerId)?.departments ?? [];
 
   const groups = useMemo(() => {
     const byDept = new Map<string, { name: string; people: DirectoryPerson[] }>();
@@ -111,31 +106,6 @@ export function EvonDirectory({
         </section>
       ) : (
         <>
-          {myColleagues.length > 0 && (
-            <section className="flex flex-col gap-2">
-              <h2 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900 dark:text-white">
-                <Users size={15} className="text-brand-600" /> Your department
-                {viewerDepartmentIds.length > 1 ? 's' : ''}
-              </h2>
-              {myDepartments.some((d) => departmentHeads[d.name]) && (
-                <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                  {myDepartments
-                    .filter((d) => departmentHeads[d.name])
-                    .map((d) => (
-                      <span key={d.id} className="flex items-center gap-1">
-                        <Crown size={11} className="text-amber-500" /> {d.name}: {departmentHeads[d.name]}
-                      </span>
-                    ))}
-                </p>
-              )}
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {myColleagues.map((p) => (
-                  <PersonCard key={p.id} person={p} isViewer={p.id === viewerId} />
-                ))}
-              </div>
-            </section>
-          )}
-
           <section className="flex flex-col gap-2">
             <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">All departments</h2>
             <div className="flex flex-col gap-2">

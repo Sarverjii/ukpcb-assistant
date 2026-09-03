@@ -31,7 +31,6 @@ export default async function DirectoryPage() {
             departments.filter((d) => d.head).map((d) => [d.name, d.head!.name]),
           )}
           viewerId={ctx.userId}
-          viewerDepartmentIds={ctx.departmentIds}
         />
       </div>
     </main>
