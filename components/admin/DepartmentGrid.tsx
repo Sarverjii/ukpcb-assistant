@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
-import { Plus, Users, FileText, Crown } from 'lucide-react';
+import { Plus, Users, FileText, Crown, Layers, UserX } from 'lucide-react';
 import { createDepartmentAction } from '@/app/(app)/admin/departments/actions';
 
 type Department = {
@@ -10,6 +10,7 @@ type Department = {
   name: string;
   description: string | null;
   head: { id: string; name: string; email: string } | null;
+  isHeadDepartment: boolean;
   memberCount: number;
   documentCount: number;
 };
@@ -20,9 +21,19 @@ type Department = {
  * you have to click through to learn anything about. Modeled on the same
  * card visual language as the document library's grid
  * (components/documents/DocumentLibraryTable.tsx), the closest existing
- * precedent for "browsable cards" in this app.
+ * precedent for "browsable cards" in this app. A trailing "No department"
+ * card — styled distinctly (dashed border, not a real Department row) —
+ * links to a lightweight worklist of employees currently in zero
+ * departments, since membership is optional and that's an expected,
+ * ordinary state worth being able to find and act on.
  */
-export function DepartmentGrid({ departments }: { departments: Department[] }) {
+export function DepartmentGrid({
+  departments,
+  noDepartmentCount,
+}: {
+  departments: Department[];
+  noDepartmentCount: number;
+}) {
   const [addOpen, setAddOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,7 +47,12 @@ export function DepartmentGrid({ departments }: { departments: Department[] }) {
             className="flex flex-col gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 hover:shadow-sm transition-colors"
           >
             <div>
-              <p className="text-sm font-semibold text-zinc-900 dark:text-white">{dept.name}</p>
+              <div className="flex items-center gap-1.5">
+                <p className="text-sm font-semibold text-zinc-900 dark:text-white">{dept.name}</p>
+                {dept.isHeadDepartment && (
+                  <Layers size={12} className="shrink-0 text-brand-600" aria-label="Head department" />
+                )}
+              </div>
               {dept.description ? (
                 <p className="mt-1 line-clamp-2 text-xs text-zinc-500 dark:text-zinc-400">{dept.description}</p>
               ) : (
@@ -61,6 +77,22 @@ export function DepartmentGrid({ departments }: { departments: Department[] }) {
             </div>
           </Link>
         ))}
+
+        <Link
+          href="/admin/departments/none"
+          className="flex flex-col gap-3 rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition-colors"
+        >
+          <div className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
+            <UserX size={14} />
+            <p className="text-sm font-semibold">No department</p>
+          </div>
+          <p className="text-xs text-zinc-400 dark:text-zinc-500">
+            Employees not currently in any department.
+          </p>
+          <div className="mt-auto flex items-center gap-1.5 border-t border-zinc-100 dark:border-zinc-800 pt-3 text-xs text-zinc-500 dark:text-zinc-400">
+            <Users size={13} /> {noDepartmentCount} employee{noDepartmentCount === 1 ? '' : 's'}
+          </div>
+        </Link>
 
         <AddDepartmentCard open={addOpen} onOpen={() => setAddOpen(true)} onClose={() => setAddOpen(false)} onError={setError} />
       </div>

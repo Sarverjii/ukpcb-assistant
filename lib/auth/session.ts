@@ -22,6 +22,11 @@ export type AuthContext = {
   // Department's schema.prisma comment and lib/db/queries/chunks.ts for the
   // resulting "clearance OR department" document-visibility rule.
   departmentIds: string[];
+  // True if ANY of this user's departments is flagged isHeadDepartment —
+  // grants visibility into every document tagged with ANY department
+  // (not just this user's own), on top of the ordinary rule above. See
+  // Department.isHeadDepartment's schema.prisma comment.
+  hasHeadDepartmentAccess: boolean;
   themePreference: 'LIGHT' | 'DARK';
   // The current LoginSession's id — null for a token issued before this
   // feature existed (see the backward-compat note below). Lets Settings'
@@ -44,7 +49,7 @@ export async function getAuthContext(): Promise<AuthContext> {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: { role: true, departments: { select: { id: true } } },
+    include: { role: true, departments: { select: { id: true, isHeadDepartment: true } } },
   });
 
   if (!user || user.status !== 'ACTIVE') throw new UnauthenticatedError();
@@ -71,6 +76,7 @@ export async function getAuthContext(): Promise<AuthContext> {
     canUploadDocuments: user.role.canUploadDocuments,
     isAdmin: user.role.isAdmin,
     departmentIds: user.departments.map((d) => d.id),
+    hasHeadDepartmentAccess: user.departments.some((d) => d.isHeadDepartment),
     themePreference: user.themePreference,
     loginSessionId,
   };

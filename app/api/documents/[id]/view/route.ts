@@ -13,11 +13,13 @@ import { getStorageProvider } from '@/lib/documents/storage';
  * needs to reach this one, since a citation can surface to any employee
  * whose clearance covers it, not just admins. Authorization here is the
  * same rule as chunk retrieval — clearanceRank <= the document's level, OR
- * the caller belongs to one of the document's departments — just checked
- * against the document directly rather than a chunk. The department half
- * was originally missing here (a real reported bug: an employee in a
- * document's department got "Not authorized" even though the Document
- * Library listing, which already had the department rule, showed it to
+ * the caller belongs to one of the document's departments, OR the caller
+ * has head-department access and the document has any department at all
+ * (see Department.isHeadDepartment) — just checked against the document
+ * directly rather than a chunk. The department half was originally missing
+ * here (a real reported bug: an employee in a document's department got
+ * "Not authorized" even though the Document Library listing, which already
+ * had the department rule, showed it to
  * them) — this route and every listing/retrieval path must always agree.
  */
 export async function GET(_request: Request, { params }: RouteContext<'/api/documents/[id]/view'>) {
@@ -41,7 +43,8 @@ export async function GET(_request: Request, { params }: RouteContext<'/api/docu
 
   const hasClearance = ctx.clearanceRank >= document.clearanceLevel;
   const hasDepartmentAccess = document.departments.some((d) => ctx.departmentIds.includes(d.id));
-  if (!hasClearance && !hasDepartmentAccess) {
+  const hasHeadDepartmentAccess = ctx.hasHeadDepartmentAccess && document.departments.length > 0;
+  if (!hasClearance && !hasDepartmentAccess && !hasHeadDepartmentAccess) {
     await logAuditEvent({
       action: 'ACCESS_DENIED',
       result: 'DENIED',

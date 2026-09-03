@@ -35,9 +35,7 @@ export function getDepartmentById(id: string) {
 /**
  * New departments start out empty — membership is managed separately from
  * the department's own detail page (see addDepartmentMemberAction /
- * removeDepartmentMemberAction). No delete action exists in this app,
- * mirroring Role (also add/rename-only, never deletable) — see
- * Department's schema.prisma comment for why.
+ * removeDepartmentMemberAction).
  */
 export function createDepartment(name: string) {
   return prisma.department.create({ data: { name } });
@@ -45,14 +43,46 @@ export function createDepartment(name: string) {
 
 /**
  * Single update path for everything editable on a department's detail
- * page — name, description, and head — so the UI can save any subset of
- * these in one round trip instead of three separate actions.
+ * page — name, description, head, and the head-department flag — so the
+ * UI can save any subset of these in one round trip instead of several
+ * separate actions.
  */
 export function updateDepartment(
   id: string,
-  data: { name?: string; description?: string | null; headUserId?: string | null },
+  data: { name?: string; description?: string | null; headUserId?: string | null; isHeadDepartment?: boolean },
 ) {
   return prisma.department.update({ where: { id }, data });
+}
+
+/**
+ * Permanently removes a department — see deleteDepartmentAction and the
+ * schema.prisma comment on Department for the full contract: every
+ * document that had this department just loses this one tag (the FK
+ * cascade on the join table handles that automatically), every employee
+ * in it just loses this one membership, same way. The one thing that
+ * DOESN'T cascade on its own is DocumentChunk.departmentIds — that's a
+ * plain text[] column, not a foreign key — so this recomputes it for
+ * every affected document in the same transaction, from each document's
+ * REMAINING departments (fetched before the delete runs), exactly
+ * mirroring what updateChunksDepartmentsForDocument does for an ordinary
+ * retag. Nothing about a document's or employee's OWN content, clearance,
+ * or account is touched — only this one relationship disappears.
+ */
+export async function deleteDepartment(id: string): Promise<void> {
+  const dept = await prisma.department.findUniqueOrThrow({
+    where: { id },
+    include: { documents: { select: { id: true, departments: { select: { id: true } } } } },
+  });
+
+  await prisma.$transaction([
+    prisma.department.delete({ where: { id } }),
+    ...dept.documents.map((doc) =>
+      prisma.documentChunk.updateMany({
+        where: { documentId: doc.id },
+        data: { departmentIds: doc.departments.filter((d) => d.id !== id).map((d) => d.id) },
+      }),
+    ),
+  ]);
 }
 
 /** A department's current members and head, for the detail/membership page. */

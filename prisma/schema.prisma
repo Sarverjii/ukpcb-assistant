@@ -182,15 +182,34 @@ model EmployeeImportBatch {
 // system above — see the module-level security note and
 // DocumentChunk.departmentIds. A User can belong to any number of
 // departments (including none, or all); a Document can be tagged with any
-// number too. No delete action is exposed in the admin UI (mirrors Role,
-// which also can't be deleted — only added/renamed/reordered), so nothing
-// in this app ever needs to handle "a document's department disappeared".
+// number too.
+//
+// Deletable (see deleteDepartmentAction / lib/db/queries/departments.ts::
+// deleteDepartment): the join-table rows on both sides cascade away via
+// the FK constraints (a document simply loses this one tag, an employee
+// simply loses this one membership — nothing else about either row is
+// touched), and DocumentChunk.departmentIds is explicitly recomputed for
+// every affected document in the same transaction, since that denormalized
+// column isn't a foreign key and doesn't cascade on its own.
 model Department {
-  id          String   @id @default(cuid())
-  name        String   @unique
+  id               String   @id @default(cuid())
+  name             String   @unique
   // Short blurb shown on the Departments admin page and the Evon
   // Directory — purely descriptive, never authorization-relevant.
-  description String?
+  description      String?
+  // A "head department" (the user's own term) sees every document tagged
+  // with ANY department, not just its own — an umbrella of visibility over
+  // every other department at once, layered on top of (never a
+  // replacement for) the ordinary clearance-or-own-department rule. Does
+  // NOT bypass clearance for a document with NO department at all — e.g. a
+  // CXO-clearance document tagged with no department stays invisible to a
+  // lower-clearance head-department member, exactly as it would to anyone
+  // else; the umbrella only ever extends to documents some department
+  // already reaches. See lib/auth/session.ts's hasHeadDepartmentAccess and
+  // lib/db/queries/chunks.ts for the enforcement. Admin-togglable per
+  // department (not hardcoded to one name), same "data, not code" spirit
+  // as Role.isAdmin/canUploadDocuments.
+  isHeadDepartment Boolean  @default(false)
   // The department's designated lead — optional, and deliberately NOT a
   // capability or clearance boost of any kind (a head has exactly the
   // access their own Role and department memberships already grant, same
@@ -198,9 +217,9 @@ model Department {
   // Departments admin page and the Evon Directory. SetNull if that
   // employee is later hard-deleted, mirroring every other "survives with
   // a cleared reference" pattern in this schema.
-  headUserId  String?
-  head        User?    @relation("DepartmentHead", fields: [headUserId], references: [id], onDelete: SetNull)
-  createdAt   DateTime @default(now())
+  headUserId       String?
+  head             User?    @relation("DepartmentHead", fields: [headUserId], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
 
   users     User[]
   documents Document[]

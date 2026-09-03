@@ -46,6 +46,7 @@ async function authContextFor(email: string): Promise<AuthContext> {
     // access is covered separately (see the "departments" test group
     // below, once added).
     departmentIds: [],
+    hasHeadDepartmentAccess: false,
     themePreference: user.themePreference,
     // No real login session in these tests — every code path under test
     // (answerQuestion/streamAnswer et al.) is session-agnostic.
@@ -66,7 +67,7 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
       const user = await authContextFor(
         TEST_USERS.find((u) => u.roleName === roleName)!.email,
       );
-      const results = await retrieveAuthorizedChunks(embedding, user.clearanceRank, [], 10);
+      const results = await retrieveAuthorizedChunks(embedding, user.clearanceRank, [], false, 10);
       for (const chunk of results) {
         expect(
           chunk.clearanceLevel,
@@ -83,10 +84,10 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
     const engineerCtx = await authContextFor('engineer@asktest.local');
     const cxoCtx = await authContextFor('cxo@asktest.local');
 
-    const asEngineer = await retrieveAuthorizedChunks(embedding, engineerCtx.clearanceRank, [], 10);
+    const asEngineer = await retrieveAuthorizedChunks(embedding, engineerCtx.clearanceRank, [], false, 10);
     expect(asEngineer.some((c) => c.documentName === 'Board Merger Plans')).toBe(false);
 
-    const asCxo = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [], 10);
+    const asCxo = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [], false, 10);
     expect(asCxo.some((c) => c.documentName === 'Board Merger Plans')).toBe(true);
   });
 
@@ -98,10 +99,10 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
     const engineerCtx = await authContextFor('engineer@asktest.local');
     const cxoCtx = await authContextFor('cxo@asktest.local');
 
-    const asEngineer = await listAccessibleDocumentSummaries(engineerCtx.clearanceRank, []);
+    const asEngineer = await listAccessibleDocumentSummaries(engineerCtx.clearanceRank, [], false);
     expect(asEngineer.some((d) => d.name === 'Board Merger Plans')).toBe(false);
 
-    const asCxo = await listAccessibleDocumentSummaries(cxoCtx.clearanceRank, []);
+    const asCxo = await listAccessibleDocumentSummaries(cxoCtx.clearanceRank, [], false);
     expect(asCxo.some((d) => d.name === 'Board Merger Plans')).toBe(true);
   });
 
@@ -124,13 +125,68 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
       embedding,
       engineerCtx.clearanceRank,
       [],
+      false,
     );
     expect(asEngineer).toHaveLength(0);
 
     const cxoCtx = await authContextFor('cxo@asktest.local');
-    const asCxo = await retrieveChunksForDocuments([boardMergerDoc.id], embedding, cxoCtx.clearanceRank, []);
+    const asCxo = await retrieveChunksForDocuments([boardMergerDoc.id], embedding, cxoCtx.clearanceRank, [], false);
     expect(asCxo.length).toBeGreaterThan(0);
     expect(asCxo.every((c) => c.matchedByDocumentName)).toBe(true);
+  });
+
+  it('a head-department member sees a document tagged with a DIFFERENT department, but gets no special access to a departmentless document', async () => {
+    // Sets up its own temporary Department rows and tags/untags the
+    // fixture's own CXO-only "Board Merger Plans" document for the
+    // duration of this test only — reverted in `finally` so this doesn't
+    // leak state into any other test.
+    const headDept = await prisma.department.create({
+      data: { name: `Test Head Dept ${Date.now()}`, isHeadDepartment: true },
+    });
+    const otherDept = await prisma.department.create({
+      data: { name: `Test Other Dept ${Date.now()}` },
+    });
+
+    const boardMergerDoc = await prisma.document.findFirstOrThrow({ where: { name: 'Board Merger Plans' } });
+    const engineer = await prisma.user.findFirstOrThrow({ where: { email: 'engineer@asktest.local' } });
+
+    try {
+      // Tag the CXO-only document with the OTHER (non-head) department —
+      // the head-department rule must grant access to it purely because
+      // it has *some* department, without the caller needing to share
+      // that specific department.
+      await prisma.document.update({ where: { id: boardMergerDoc.id }, data: { departments: { connect: { id: otherDept.id } } } });
+      await prisma.documentChunk.updateMany({ where: { documentId: boardMergerDoc.id }, data: { departmentIds: [otherDept.id] } });
+
+      const embedder = getEmbeddingProvider();
+      const [embedding] = await embedder.embed(['Northwind acquisition due diligence'], 'RETRIEVAL_QUERY');
+      const engineerRank = (await prisma.role.findUniqueOrThrow({ where: { id: engineer.roleId } })).hierarchyRank;
+
+      // A low-clearance user in ONLY the head department (not otherDept)
+      // must still see it.
+      const asHeadDeptMember = await retrieveAuthorizedChunks(embedding, engineerRank, [headDept.id], true, 10);
+      expect(asHeadDeptMember.some((c) => c.documentName === 'Board Merger Plans')).toBe(true);
+
+      // The exact same low clearance, WITHOUT head-department access, must
+      // still be refused — proves this is additive, not a general
+      // clearance bypass tied to the rank alone.
+      const withoutHeadAccess = await retrieveAuthorizedChunks(embedding, engineerRank, [], false, 10);
+      expect(withoutHeadAccess.some((c) => c.documentName === 'Board Merger Plans')).toBe(false);
+
+      // Now strip the document back to NO department at all — a
+      // head-department member must NOT get access to a departmentless
+      // document just from clearance-independent head status.
+      await prisma.documentChunk.updateMany({ where: { documentId: boardMergerDoc.id }, data: { departmentIds: [] } });
+      const afterUndeparted = await retrieveAuthorizedChunks(embedding, engineerRank, [headDept.id], true, 10);
+      expect(afterUndeparted.some((c) => c.documentName === 'Board Merger Plans')).toBe(false);
+    } finally {
+      // Revert the fixture document to its original, departmentless state
+      // and remove the temporary departments entirely.
+      await prisma.documentChunk.updateMany({ where: { documentId: boardMergerDoc.id }, data: { departmentIds: [] } });
+      await prisma.document.update({ where: { id: boardMergerDoc.id }, data: { departments: { set: [] } } });
+      await prisma.department.delete({ where: { id: headDept.id } });
+      await prisma.department.delete({ where: { id: otherDept.id } });
+    }
   });
 });
 

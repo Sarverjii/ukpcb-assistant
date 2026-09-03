@@ -26,19 +26,23 @@ export type RetrievedChunk = {
  * LLM. Do not "fetch then filter in JS" this query; that would be the
  * insufficient pattern the spec explicitly calls out.
  *
- * A chunk is authorized if EITHER the caller's clearance rank covers it OR
- * the caller belongs to at least one of the chunk's (denormalized)
- * departments — the additive department-visibility rule (e.g. a document at
+ * A chunk is authorized if the caller's clearance rank covers it, OR the
+ * caller belongs to at least one of the chunk's (denormalized) departments
+ * — the additive department-visibility rule (e.g. a document at
  * "President" clearance tagged "HR" is visible to President-and-above AND
- * to every HR employee regardless of their own rank). `dc."departmentIds"
- * && userDepartmentIds` is Postgres's array-overlap operator; an empty
- * `userDepartmentIds` array makes that side always false, so a
- * departmentless caller correctly falls back to pure clearance with no
- * special-casing needed.
+ * to every HR employee regardless of their own rank) — OR the caller
+ * belongs to a "head department" (see Department.isHeadDepartment) and the
+ * chunk has ANY department at all. `dc."departmentIds" && userDepartmentIds`
+ * is Postgres's array-overlap operator; `cardinality(dc."departmentIds") > 0`
+ * is true only for a chunk with at least one department (a head-department
+ * member gets no special access to a departmentless chunk — that stays
+ * gated on clearance alone, same as for anyone else). An empty
+ * `userDepartmentIds` array and `hasHeadDepartmentAccess: false` both
+ * correctly fall back to pure clearance with no special-casing needed.
  *
- * `userClearanceRank`/`userDepartmentIds` MUST come from a server-side,
- * DB-verified session (see lib/auth/session.ts::getAuthContext) — never
- * from client input.
+ * `userClearanceRank`/`userDepartmentIds`/`hasHeadDepartmentAccess` MUST
+ * come from a server-side, DB-verified session (see
+ * lib/auth/session.ts::getAuthContext) — never from client input.
  *
  * Uses Prisma's tagged-template $queryRaw, which parameterizes every
  * interpolated value — this is not string concatenation and is not
@@ -49,6 +53,7 @@ export async function retrieveAuthorizedChunks(
   queryEmbedding: number[],
   userClearanceRank: number,
   userDepartmentIds: string[],
+  hasHeadDepartmentAccess: boolean,
   topK = 6,
 ): Promise<RetrievedChunk[]> {
   const vec = toSql(queryEmbedding);
@@ -63,7 +68,11 @@ export async function retrieveAuthorizedChunks(
       1 - (dc.embedding <=> ${vec}::vector) AS similarity
     FROM "DocumentChunk" dc
     JOIN "Document" d ON d.id = dc."documentId"
-    WHERE (dc."clearanceRank" <= ${userClearanceRank} OR dc."departmentIds" && ${userDepartmentIds}::text[])
+    WHERE (
+        dc."clearanceRank" <= ${userClearanceRank}
+        OR dc."departmentIds" && ${userDepartmentIds}::text[]
+        OR (${hasHeadDepartmentAccess} AND cardinality(dc."departmentIds") > 0)
+      )
       AND d.status = 'READY'
     ORDER BY dc.embedding <=> ${vec}::vector
     LIMIT ${topK}
@@ -104,6 +113,7 @@ export async function getChunkForUser(
   chunkId: string,
   userClearanceRank: number,
   userDepartmentIds: string[],
+  hasHeadDepartmentAccess: boolean,
 ): Promise<ChunkForUser | null> {
   const rows = await prisma.$queryRaw<ChunkForUser[]>`
     SELECT dc.id, dc.content, dc."documentId" AS "documentId", d.name AS "documentName",
@@ -112,7 +122,11 @@ export async function getChunkForUser(
     FROM "DocumentChunk" dc
     JOIN "Document" d ON d.id = dc."documentId"
     WHERE dc.id = ${chunkId}
-      AND (dc."clearanceRank" <= ${userClearanceRank} OR dc."departmentIds" && ${userDepartmentIds}::text[])
+      AND (
+        dc."clearanceRank" <= ${userClearanceRank}
+        OR dc."departmentIds" && ${userDepartmentIds}::text[]
+        OR (${hasHeadDepartmentAccess} AND cardinality(dc."departmentIds") > 0)
+      )
     LIMIT 1
   `;
   return rows[0] ?? null;
@@ -138,6 +152,7 @@ export async function retrieveChunksForDocuments(
   queryEmbedding: number[],
   userClearanceRank: number,
   userDepartmentIds: string[],
+  hasHeadDepartmentAccess: boolean,
   capPerDocument = 8,
 ): Promise<RetrievedChunk[]> {
   if (documentIds.length === 0) return [];
@@ -158,7 +173,11 @@ export async function retrieveChunksForDocuments(
         ) AS rank
       FROM "DocumentChunk" dc
       JOIN "Document" d ON d.id = dc."documentId"
-      WHERE (dc."clearanceRank" <= ${userClearanceRank} OR dc."departmentIds" && ${userDepartmentIds}::text[])
+      WHERE (
+          dc."clearanceRank" <= ${userClearanceRank}
+          OR dc."departmentIds" && ${userDepartmentIds}::text[]
+          OR (${hasHeadDepartmentAccess} AND cardinality(dc."departmentIds") > 0)
+        )
         AND d.status = 'READY'
         AND dc."documentId" = ANY(${documentIds}::text[])
     ) ranked

@@ -167,6 +167,16 @@ export function describeAuditEvent(
       if (prev && next) return `Renamed department "${prev}" to "${next}"`;
       return next ? `Renamed a department to "${next}"` : 'Renamed a department';
     }
+    case 'DEPARTMENT_DELETED': {
+      const name = str(m.name);
+      return name ? `Deleted department "${name}"` : 'Deleted a department';
+    }
+    case 'DEPARTMENT_HEAD_FLAG_CHANGED': {
+      const dept = str(m.departmentName) ?? 'a department';
+      return m.isHeadDepartment
+        ? `Made "${dept}" a head department (sees every department's documents)`
+        : `Removed "${dept}"'s head-department status`;
+    }
     case 'DEPARTMENT_MEMBER_ADDED': {
       const dept = str(m.departmentName) ?? 'a department';
       const emp = str(m.employeeName) ?? 'an employee';

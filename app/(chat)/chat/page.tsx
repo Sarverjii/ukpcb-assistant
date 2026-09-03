@@ -11,7 +11,7 @@ import { ChatPanel } from '@/components/chat/ChatPanel';
 // composer needs it before any conversation exists.
 export default async function ChatDraftPage() {
   const ctx = await getAuthContext();
-  const documents = await listAccessibleDocumentSummaries(ctx.clearanceRank, ctx.departmentIds);
+  const documents = await listAccessibleDocumentSummaries(ctx.clearanceRank, ctx.departmentIds, ctx.hasHeadDepartmentAccess);
 
   return (
     <ChatPanel

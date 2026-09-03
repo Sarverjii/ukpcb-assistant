@@ -12,7 +12,7 @@ import { DocumentLibraryTable } from '@/components/documents/DocumentLibraryTabl
 export default async function DocumentLibraryPage() {
   const ctx = await getAuthContext();
   const [documents, allRoles, allDepartments] = await Promise.all([
-    listAccessibleDocumentSummariesForBrowsing(ctx.clearanceRank, ctx.departmentIds),
+    listAccessibleDocumentSummariesForBrowsing(ctx.clearanceRank, ctx.departmentIds, ctx.hasHeadDepartmentAccess),
     listRolesByRank(),
     listDepartments(),
   ]);

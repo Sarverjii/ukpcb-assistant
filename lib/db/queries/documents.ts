@@ -118,16 +118,22 @@ export function listDocumentsByUploader(uploadedById: string) {
  * included, sees only what their own clearanceRank/departments allow here.
  * `userDepartmentIds` extends visibility additively — a document is shown
  * if EITHER the clearance check passes OR the viewer shares a department
- * with the document, mirroring the SQL-level rule in
+ * with the document, OR the viewer has head-department access and the
+ * document has any department at all — mirroring the SQL-level rule in
  * lib/db/queries/chunks.ts.
  */
-export function listAccessibleDocumentSummariesForBrowsing(userClearanceRank: number, userDepartmentIds: string[]) {
+export function listAccessibleDocumentSummariesForBrowsing(
+  userClearanceRank: number,
+  userDepartmentIds: string[],
+  hasHeadDepartmentAccess: boolean,
+) {
   return prisma.document.findMany({
     where: {
       status: 'READY',
       OR: [
         { clearanceLevel: { lte: userClearanceRank } },
         { departments: { some: { id: { in: userDepartmentIds } } } },
+        ...(hasHeadDepartmentAccess ? [{ departments: { some: {} } }] : []),
       ],
     },
     select: {
@@ -174,16 +180,21 @@ export function updateDocumentFile(
  * is a different data source (document inventory, not document content),
  * not a relaxation of the content-retrieval boundary. See
  * lib/rag/chat.ts::answerQuestion for how the two are kept separate in the
- * prompt the model actually sees. `userDepartmentIds` extends this the same
- * additive way as listAccessibleDocumentSummariesForBrowsing above.
+ * prompt the model actually sees. `userDepartmentIds`/`hasHeadDepartmentAccess`
+ * extend this the same additive way as listAccessibleDocumentSummariesForBrowsing above.
  */
-export function listAccessibleDocumentSummaries(userClearanceRank: number, userDepartmentIds: string[]) {
+export function listAccessibleDocumentSummaries(
+  userClearanceRank: number,
+  userDepartmentIds: string[],
+  hasHeadDepartmentAccess: boolean,
+) {
   return prisma.document.findMany({
     where: {
       status: 'READY',
       OR: [
         { clearanceLevel: { lte: userClearanceRank } },
         { departments: { some: { id: { in: userDepartmentIds } } } },
+        ...(hasHeadDepartmentAccess ? [{ departments: { some: {} } }] : []),
       ],
     },
     // id isn't sent to the LLM (see DocumentSummary in lib/llm/types.ts,

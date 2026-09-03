@@ -1,5 +1,6 @@
 import { getAuthContext } from '@/lib/auth/session';
 import { listDirectoryEntries } from '@/lib/db/queries/users';
+import { listDepartmentsWithStats } from '@/lib/db/queries/departments';
 import { EvonDirectory } from '@/components/directory/EvonDirectory';
 
 // Every authenticated active employee can browse this — same gating as
@@ -9,7 +10,7 @@ import { EvonDirectory } from '@/components/directory/EvonDirectory';
 // needs a higher bar than "is a real, active employee."
 export default async function DirectoryPage() {
   const ctx = await getAuthContext();
-  const entries = await listDirectoryEntries();
+  const [entries, departments] = await Promise.all([listDirectoryEntries(), listDepartmentsWithStats()]);
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
@@ -26,6 +27,9 @@ export default async function DirectoryPage() {
             roleName: e.role.name,
             departments: e.departments,
           }))}
+          departmentHeads={Object.fromEntries(
+            departments.filter((d) => d.head).map((d) => [d.name, d.head!.name]),
+          )}
           viewerId={ctx.userId}
           viewerDepartmentIds={ctx.departmentIds}
         />

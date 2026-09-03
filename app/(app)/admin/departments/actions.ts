@@ -8,6 +8,7 @@ import { getUserById } from '@/lib/db/queries/users';
 import {
   createDepartment,
   updateDepartment,
+  deleteDepartment,
   getDepartmentById,
   addDepartmentMember,
   removeDepartmentMember,
@@ -40,15 +41,16 @@ export async function createDepartmentAction(formData: FormData): Promise<Action
 }
 
 /**
- * Single save path for a department's name, description, and head — the
- * detail page's edit form submits whichever of these actually changed;
- * unpassed fields are left untouched (undefined, not null, so "no change"
- * and "clear this field" stay distinguishable — headUserId: null explicitly
- * clears the head, headUserId: undefined leaves it as-is).
+ * Single save path for a department's name, description, head, and
+ * head-department flag — the detail page's edit form submits whichever of
+ * these actually changed; unpassed fields are left untouched (undefined,
+ * not null, so "no change" and "clear this field" stay distinguishable —
+ * headUserId: null explicitly clears the head, headUserId: undefined
+ * leaves it as-is).
  */
 export async function updateDepartmentAction(
   departmentId: string,
-  changes: { name?: string; description?: string | null; headUserId?: string | null },
+  changes: { name?: string; description?: string | null; headUserId?: string | null; isHeadDepartment?: boolean },
 ): Promise<ActionResult> {
   const ctx = await getAuthContext();
   await requireAdmin(ctx);
@@ -76,8 +78,46 @@ export async function updateDepartmentAction(
       metadata: { previousName: before.name, newName: changes.name.trim() },
     });
   }
+  if (changes.isHeadDepartment !== undefined && changes.isHeadDepartment !== before.isHeadDepartment) {
+    await logAuditEvent({
+      action: 'DEPARTMENT_HEAD_FLAG_CHANGED',
+      result: 'SUCCESS',
+      userId: ctx.userId,
+      resource: departmentId,
+      metadata: { departmentName: before.name, isHeadDepartment: changes.isHeadDepartment },
+    });
+  }
   revalidatePath('/admin/departments');
   revalidatePath(`/admin/departments/${departmentId}`);
+  revalidatePath('/directory');
+  return {};
+}
+
+/**
+ * Real, permanent deletion — see deleteDepartment's own doc comment for
+ * the full contract (documents just lose this one tag, employees just
+ * lose this one membership, nothing else touched). A plain two-click
+ * confirm in the UI, not a password re-auth dialog: unlike deleting an
+ * employee or a document, nothing here destroys real content — every
+ * effect is a detached relationship, trivially reversible by re-tagging.
+ */
+export async function deleteDepartmentAction(departmentId: string): Promise<ActionResult> {
+  const ctx = await getAuthContext();
+  await requireAdmin(ctx);
+
+  const dept = await getDepartmentById(departmentId);
+  await deleteDepartment(departmentId);
+  await logAuditEvent({
+    action: 'DEPARTMENT_DELETED',
+    result: 'SUCCESS',
+    userId: ctx.userId,
+    resource: departmentId,
+    metadata: { name: dept.name },
+  });
+
+  revalidatePath('/admin/departments');
+  revalidatePath('/admin/employees');
+  revalidatePath('/knowledge-base');
   revalidatePath('/directory');
   return {};
 }

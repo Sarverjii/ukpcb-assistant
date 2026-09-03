@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Search, Mail, Users } from 'lucide-react';
+import { Search, Mail, Users, Crown } from 'lucide-react';
 
 export type DirectoryPerson = {
   id: string;
@@ -33,10 +33,15 @@ export type DirectoryPerson = {
  */
 export function EvonDirectory({
   people,
+  departmentHeads,
   viewerId,
   viewerDepartmentIds,
 }: {
   people: DirectoryPerson[];
+  // Department name -> head's name, for the small "Headed by" line on
+  // each browsable group below. Keyed by name (not id) since that's what
+  // the person-grouping already uses as its key.
+  departmentHeads: Record<string, string>;
   viewerId: string;
   viewerDepartmentIds: string[];
 }) {
@@ -56,6 +61,7 @@ export function EvonDirectory({
 
   const myDepartmentSet = new Set(viewerDepartmentIds);
   const myColleagues = people.filter((p) => p.departments.some((d) => myDepartmentSet.has(d.id)));
+  const myDepartments = people.find((p) => p.id === viewerId)?.departments ?? [];
 
   const groups = useMemo(() => {
     const byDept = new Map<string, { name: string; people: DirectoryPerson[] }>();
@@ -111,6 +117,17 @@ export function EvonDirectory({
                 <Users size={15} className="text-brand-600" /> Your department
                 {viewerDepartmentIds.length > 1 ? 's' : ''}
               </h2>
+              {myDepartments.some((d) => departmentHeads[d.name]) && (
+                <p className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                  {myDepartments
+                    .filter((d) => departmentHeads[d.name])
+                    .map((d) => (
+                      <span key={d.id} className="flex items-center gap-1">
+                        <Crown size={11} className="text-amber-500" /> {d.name}: {departmentHeads[d.name]}
+                      </span>
+                    ))}
+                </p>
+              )}
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {myColleagues.map((p) => (
                   <PersonCard key={p.id} person={p} isViewer={p.id === viewerId} />
@@ -127,9 +144,16 @@ export function EvonDirectory({
                   key={group.name}
                   className="group rounded-lg border border-zinc-200 dark:border-zinc-800 open:pb-3"
                 >
-                  <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                    <span>{group.name}</span>
-                    <span className="text-xs font-normal text-zinc-400">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-2.5 text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate">{group.name}</span>
+                      {departmentHeads[group.name] && (
+                        <span className="flex shrink-0 items-center gap-1 text-xs font-normal text-zinc-500 dark:text-zinc-400">
+                          <Crown size={11} className="text-amber-500" /> {departmentHeads[group.name]}
+                        </span>
+                      )}
+                    </span>
+                    <span className="shrink-0 text-xs font-normal text-zinc-400">
                       {group.people.length} {group.people.length === 1 ? 'person' : 'people'}
                     </span>
                   </summary>

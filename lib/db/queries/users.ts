@@ -23,6 +23,22 @@ export function listUsersWithRole() {
   });
 }
 
+/**
+ * Every active-or-disabled employee currently in ZERO departments — since
+ * department membership is optional (see User.departments), this is a
+ * real, expected state, not an error. Backs the admin "No department"
+ * page (a lightweight companion to the real Departments — not a
+ * Department row itself, just a worklist for assigning these people
+ * somewhere) and the Evon Directory's own "No department" group.
+ */
+export function listUsersWithoutDepartment() {
+  return prisma.user.findMany({
+    where: { status: { not: 'REMOVED' }, departments: { none: {} } },
+    include: { role: true },
+    orderBy: { name: 'asc' },
+  });
+}
+
 export function listRemovedUsersWithRole() {
   return prisma.user.findMany({
     where: { status: 'REMOVED' },

@@ -156,7 +156,11 @@ async function retrieveContext(
   // clearance rule as chunk retrieval. Also doubles as the candidate list
   // for matchDocumentsByName below. Fetched even in scoped mode (below) —
   // harmless, and still lets the model reason about "what else exists".
-  const accessibleDocuments = await listAccessibleDocumentSummaries(ctx.clearanceRank, ctx.departmentIds);
+  const accessibleDocuments = await listAccessibleDocumentSummaries(
+    ctx.clearanceRank,
+    ctx.departmentIds,
+    ctx.hasHeadDepartmentAccess,
+  );
   const documentInventory = accessibleDocuments.map(({ name, description }) => ({ name, description }));
 
   // The user explicitly picked which document(s) to answer from (Feature 3
@@ -172,11 +176,18 @@ async function retrieveContext(
       queryEmbedding,
       ctx.clearanceRank,
       ctx.departmentIds,
+      ctx.hasHeadDepartmentAccess,
     );
     return { relevant, documentInventory, retrievalQuery };
   }
 
-  const vectorChunks = await retrieveAuthorizedChunks(queryEmbedding, ctx.clearanceRank, ctx.departmentIds, TOP_K);
+  const vectorChunks = await retrieveAuthorizedChunks(
+    queryEmbedding,
+    ctx.clearanceRank,
+    ctx.departmentIds,
+    ctx.hasHeadDepartmentAccess,
+    TOP_K,
+  );
 
   // If the question directly names one of this user's authorized documents
   // (e.g. "what tools were used in the Rent project"), pull that document's
@@ -196,6 +207,7 @@ async function retrieveContext(
     queryEmbedding,
     ctx.clearanceRank,
     ctx.departmentIds,
+    ctx.hasHeadDepartmentAccess,
   );
 
   const chunks = mergeChunks(vectorChunks, nameMatchedChunks);
