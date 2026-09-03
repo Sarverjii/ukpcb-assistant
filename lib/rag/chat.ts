@@ -24,20 +24,26 @@ const SIMILARITY_THRESHOLD = 0.3;
 // growing with the whole conversation. Retrieval quality on a follow-up
 // depends on the last couple of turns' topic, not the full transcript.
 const MAX_CONDENSE_HISTORY_MESSAGES = 6;
-// Was 6, then 20 — both too small for the corpus this now actually holds.
-// 20 was set when the corpus was 35 documents / 353 chunks (see the case
-// that motivated it, below). The corpus has since grown to 89 documents /
-// 1012 chunks (mainly from website crawling), and the same failure mode
-// recurred: "Who is Sukhminder Kaur at Evon" — asked after her name and
-// title were ingested verbatim from a real page
-// (embeddedsystems.evontech.com/firmware-development-services/) — scored
-// 0.688 similarity, comfortably above SIMILARITY_THRESHOLD, but ranked
-// #82 of 1012, so LIMIT 20 discarded it before the threshold filter ever
-// saw it (confirmed directly against the production DB and embedding
-// provider, not guessed). A marketing site's per-page bio/consultant
-// blurbs are numerous and semantically similar to each other, so a
-// genuinely-matching chunk can rank surprisingly far down even when nothing
-// is wrong with its embedding.
+// Was 6, then 20, then 100 — all too small for the corpus this now
+// actually holds. 20 was set when the corpus was 35 documents / 353
+// chunks (see the "how many projects" case below); 100 was a first
+// attempt at fixing the case below it, but turned out to still be too
+// tight. The corpus has since grown to 89 documents / 1012 chunks (mainly
+// from website crawling), and ranked position for a genuine match turned
+// out to vary a lot with how the question happens to be phrased — for
+// "Who is Sukhminder Kaur at Evon" (her name and title are ingested
+// verbatim from a real page, embeddedsystems.evontech.com/
+// firmware-development-services/), the matching chunk scores 0.67-0.69
+// similarity across five real rephrasings (comfortably above
+// SIMILARITY_THRESHOLD every time) but ranks anywhere from #45 to #144 of
+// 1012 depending on exact wording — all measured directly against the
+// production DB and embedding provider, not guessed, including
+// confirming 100 was NOT enough (still missed the answer live in
+// production after that fix shipped). A marketing site's per-page
+// bio/consultant blurbs are numerous and semantically similar to each
+// other, so a genuinely-matching chunk can land surprisingly far down
+// even when nothing is wrong with its embedding, and exactly how far down
+// isn't stable across paraphrases of the same question.
 //
 // The original case this constant was raised for: for "how many projects
 // have we worked on", the one chunk that actually answers it (a stats
@@ -47,11 +53,16 @@ const MAX_CONDENSE_HISTORY_MESSAGES = 6;
 //
 // Raising this doesn't loosen what counts as "relevant" (SIMILARITY_THRESHOLD
 // still does that job); it just stops truncating the candidate pool before
-// a real match can reach it. 100 chunks of ~1000 chars (~25K tokens) is
-// still a small fraction of Gemini's context window, and this constant has
-// now needed raising twice as the same website-ingestion feature grew the
-// corpus — expect to revisit it again as more sites get crawled.
-const TOP_K = 100;
+// a real match can reach it. 150 is set with real margin above the worst
+// rank measured above (144), not just enough to scrape by — 150 chunks of
+// ~1000 chars (~37K tokens) is still a small fraction of Gemini's context
+// window. This constant has now needed raising three times as the same
+// website-ingestion feature grew the corpus; if it needs raising again,
+// a per-document cap (see retrieveChunksForDocuments's capPerDocument)
+// combined with a larger raw fetch is worth trying instead of a fourth
+// blind bump — measured directly here to still not be enough on its own
+// at this corpus size, but the corpus will keep growing.
+const TOP_K = 150;
 
 export type Citation = {
   documentId: string;
