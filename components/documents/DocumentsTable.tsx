@@ -121,7 +121,9 @@ export function DocumentsTable({
               <th className="px-3 py-2">Department</th>
               <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2">Updated</th>
-              <th className="px-3 py-2">Actions</th>
+              <th className="sticky right-0 bg-zinc-50 px-3 py-2 shadow-[-8px_0_8px_-6px_rgba(0,0,0,0.15)] dark:bg-zinc-900">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -282,7 +284,7 @@ function DocumentRow({
       <td className="px-3 py-2 whitespace-nowrap text-zinc-500">
         <LocalTime iso={doc.updatedAt} />
       </td>
-      <td className="px-3 py-2">
+      <td className="sticky right-0 bg-white px-3 py-2 shadow-[-8px_0_8px_-6px_rgba(0,0,0,0.15)] dark:bg-zinc-900">
         <div className="flex flex-wrap gap-2">
           <a
             href={`/api/documents/${doc.id}/download`}
