@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { getAuthContext, UnauthenticatedError } from '@/lib/auth/session';
 import { listConversationsForUser } from '@/lib/db/queries/conversations';
+import { isProviderActive } from '@/lib/db/queries/aiProviders';
 import { ChatShell } from '@/components/chat/ChatShell';
 
 export default async function ChatLayout({ children }: { children: React.ReactNode }) {
@@ -12,7 +13,11 @@ export default async function ChatLayout({ children }: { children: React.ReactNo
     throw err;
   }
 
-  const conversations = await listConversationsForUser(ctx.userId);
+  const [conversations, llmActive, embeddingActive] = await Promise.all([
+    listConversationsForUser(ctx.userId),
+    isProviderActive('LLM'),
+    isProviderActive('EMBEDDING'),
+  ]);
 
   return (
     <ChatShell
@@ -20,6 +25,7 @@ export default async function ChatLayout({ children }: { children: React.ReactNo
       canUploadDocuments={ctx.canUploadDocuments}
       isAdmin={ctx.isAdmin}
       initialTheme={ctx.themePreference}
+      providerOffline={{ llm: !llmActive, embedding: !embeddingActive }}
       conversations={conversations.map((c) => ({
         id: c.id,
         title: c.title,

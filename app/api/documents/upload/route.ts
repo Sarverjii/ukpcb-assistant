@@ -9,10 +9,10 @@ import { logAuditEvent } from '@/lib/audit/log';
 import { config } from '@/lib/config';
 
 // Document processing (extract → chunk → embed → insert) can take well
-// past a serverless platform's default timeout on a cold instance — the
-// local embedding model may need to download on first use (see
-// lib/embeddings/localTransformersProvider.ts). 60s is comfortably above
-// what a warm instance needs and within Vercel Hobby's ceiling.
+// past a serverless platform's default timeout on a cold instance,
+// especially with a hosted embedding provider's own network latency
+// stacked across every chunk. 60s is comfortably above what a warm
+// instance needs and within Vercel Hobby's ceiling.
 export const maxDuration = 60;
 
 export async function POST(request: Request) {

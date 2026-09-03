@@ -3,7 +3,14 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   // @huggingface/transformers ships native ONNX runtime bindings and large
   // WASM assets — let Node require() it directly instead of having
-  // Turbopack try to bundle it (see lib/embeddings/localTransformersProvider.ts).
+  // Turbopack try to bundle it. (The provider that used it,
+  // LocalTransformersEmbeddingProvider, was removed once every embedding
+  // provider became DB-configured via Admin -> AI Models — it was already
+  // excluded from that UI as dimension-incompatible with this app's
+  // vector(768) column, and losing its env var removed its last
+  // reachable entry point. This special-casing is left in place in case
+  // a future dev-only provider needs the same package again; it's inert
+  // otherwise.)
   // pdf-parse (via pdfjs-dist) ships a pdf.worker.mjs file it loads by
   // relative path at runtime — Turbopack bundling it moved/omitted that
   // file, breaking every PDF upload with "Setting up fake worker failed:

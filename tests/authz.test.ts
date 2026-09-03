@@ -9,15 +9,12 @@ import { answerQuestion } from '../lib/rag/chat';
 import { NO_AUTHORIZED_INFO_ANSWER } from '../lib/llm/promptTemplates';
 import type { AuthContext } from '../lib/auth/session';
 
-// Whichever LLM_PROVIDER is configured (see .env) — "ollama" needs a running
-// local server, "anthropic" needs a real API key. Tests that actually call
-// the model are skipped (not failed) when neither is set up, since that's a
-// valid local-dev state; the DB-layer tests above them run regardless and
-// are what actually proves the security boundary.
-const llmProviderConfigured =
-  process.env.LLM_PROVIDER === 'ollama' ||
-  !!process.env.ANTHROPIC_API_KEY ||
-  !!process.env.GEMINI_API_KEY;
+// True exactly when tests/setup.ts had a GEMINI_API_KEY to auto-provision a
+// real, DB-activated provider with — tests that actually call the model are
+// skipped (not failed) otherwise, since that's a valid local-dev state; the
+// DB-layer tests above them run regardless and are what actually proves the
+// security boundary.
+const llmProviderConfigured = !!process.env.GEMINI_API_KEY;
 
 /**
  * The core, non-negotiable security requirement from the spec (§35):
