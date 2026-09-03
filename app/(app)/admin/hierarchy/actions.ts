@@ -5,7 +5,14 @@ import { getAuthContext } from '@/lib/auth/session';
 import { requireAdmin } from '@/lib/auth/rbac';
 import { logAuditEvent } from '@/lib/audit/log';
 import { prisma } from '@/lib/db/prisma';
-import { listRolesByRankDesc, createRole, swapRoleRanks } from '@/lib/db/queries/roles';
+import {
+  listRolesByRankDesc,
+  createRole,
+  swapRoleRanks,
+  renameRole,
+  deleteRole,
+  countUsersWithRole,
+} from '@/lib/db/queries/roles';
 
 export type ActionResult = { error?: string };
 
@@ -59,6 +66,64 @@ export async function moveRoleAction(roleId: string, direction: 'up' | 'down'): 
       direction,
       swappedWithRoleName: roles[swapIndex].name,
     },
+  });
+
+  revalidatePath('/admin/hierarchy');
+  return {};
+}
+
+export async function renameRoleAction(roleId: string, name: string): Promise<ActionResult> {
+  const ctx = await getAuthContext();
+  await requireAdmin(ctx);
+
+  const trimmed = name.trim();
+  if (!trimmed) return { error: 'Role name is required.' };
+
+  const before = await prisma.role.findUniqueOrThrow({ where: { id: roleId } });
+  try {
+    await renameRole(roleId, trimmed);
+  } catch {
+    return { error: 'Could not rename role — is that name already in use?' };
+  }
+
+  await logAuditEvent({
+    action: 'ROLE_HIERARCHY_CHANGED',
+    result: 'SUCCESS',
+    userId: ctx.userId,
+    resource: roleId,
+    metadata: { field: 'name', oldValue: before.name, newValue: trimmed },
+  });
+
+  revalidatePath('/admin/hierarchy');
+  return {};
+}
+
+/**
+ * Only ever succeeds when zero employees currently hold this role (see
+ * deleteRole's own comment) — used to retire a role that's no longer part
+ * of the org chart, e.g. after every employee who held it has been
+ * reassigned or removed. Clearance thresholds recorded on documents
+ * (Document.clearanceLevel, an integer, not a foreign key to Role) are
+ * untouched by this — a deleted role's old hierarchyRank number simply
+ * stops appearing as a selectable option going forward.
+ */
+export async function deleteRoleAction(roleId: string): Promise<ActionResult> {
+  const ctx = await getAuthContext();
+  await requireAdmin(ctx);
+
+  const role = await prisma.role.findUniqueOrThrow({ where: { id: roleId } });
+  const userCount = await countUsersWithRole(roleId);
+  if (userCount > 0) {
+    return { error: `${userCount} employee${userCount === 1 ? '' : 's'} still ${userCount === 1 ? 'has' : 'have'} this role — reassign or remove them first.` };
+  }
+
+  await deleteRole(roleId);
+  await logAuditEvent({
+    action: 'ROLE_HIERARCHY_CHANGED',
+    result: 'SUCCESS',
+    userId: ctx.userId,
+    resource: roleId,
+    metadata: { field: 'deleted', roleName: role.name },
   });
 
   revalidatePath('/admin/hierarchy');

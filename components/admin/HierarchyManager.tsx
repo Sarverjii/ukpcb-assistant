@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { ChevronUp, ChevronDown, Plus, ShieldCheck, Upload } from 'lucide-react';
+import { ChevronUp, ChevronDown, Plus, ShieldCheck, Upload, Pencil, Trash2, Check, X } from 'lucide-react';
 import {
   createRoleAction,
   moveRoleAction,
   toggleRoleCapabilityAction,
+  renameRoleAction,
+  deleteRoleAction,
 } from '@/app/(app)/admin/hierarchy/actions';
 
 type Role = {
@@ -21,6 +23,9 @@ export function HierarchyManager({ roles }: { roles: Role[] }) {
   const [, startTransition] = useTransition();
   const [addOpen, setAddOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
 
   function move(roleId: string, direction: 'up' | 'down') {
     setPendingId(roleId);
@@ -38,6 +43,38 @@ export function HierarchyManager({ roles }: { roles: Role[] }) {
     startTransition(async () => {
       const result = await toggleRoleCapabilityAction(roleId, field);
       if (result.error) setError(result.error);
+      setPendingId(null);
+    });
+  }
+
+  function startEdit(role: Role) {
+    setEditingId(role.id);
+    setEditValue(role.name);
+    setError(null);
+  }
+
+  function saveEdit(roleId: string) {
+    setPendingId(roleId);
+    setError(null);
+    startTransition(async () => {
+      const result = await renameRoleAction(roleId, editValue);
+      if (result.error) setError(result.error);
+      else setEditingId(null);
+      setPendingId(null);
+    });
+  }
+
+  function handleDelete(roleId: string) {
+    if (confirmingDeleteId !== roleId) {
+      setConfirmingDeleteId(roleId);
+      return;
+    }
+    setPendingId(roleId);
+    setError(null);
+    startTransition(async () => {
+      const result = await deleteRoleAction(roleId);
+      if (result.error) setError(result.error);
+      setConfirmingDeleteId(null);
       setPendingId(null);
     });
   }
@@ -77,9 +114,53 @@ export function HierarchyManager({ roles }: { roles: Role[] }) {
               {role.hierarchyRank}
             </span>
 
-            <span className="min-w-0 flex-1 truncate text-sm font-medium text-zinc-900 dark:text-white">
-              {role.name}
-            </span>
+            {editingId === role.id ? (
+              <span className="flex min-w-0 flex-1 items-center gap-1">
+                <input
+                  autoFocus
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveEdit(role.id);
+                    if (e.key === 'Escape') setEditingId(null);
+                  }}
+                  disabled={pendingId === role.id}
+                  className="min-w-0 flex-1 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={() => saveEdit(role.id)}
+                  disabled={pendingId === role.id}
+                  aria-label="Save name"
+                  className="rounded p-1 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950 disabled:opacity-50"
+                >
+                  <Check size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingId(null)}
+                  disabled={pendingId === role.id}
+                  aria-label="Cancel"
+                  className="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+                >
+                  <X size={14} />
+                </button>
+              </span>
+            ) : (
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                <span className="min-w-0 truncate text-sm font-medium text-zinc-900 dark:text-white">
+                  {role.name}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => startEdit(role)}
+                  aria-label={`Rename ${role.name}`}
+                  className="shrink-0 rounded p-1 text-zinc-300 hover:text-brand-600 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  <Pencil size={12} />
+                </button>
+              </span>
+            )}
 
             <button
               type="button"
@@ -107,6 +188,21 @@ export function HierarchyManager({ roles }: { roles: Role[] }) {
               title="Admin dashboard access"
             >
               <ShieldCheck size={12} /> <span className="hidden sm:inline">Admin</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleDelete(role.id)}
+              disabled={pendingId === role.id}
+              title="Delete role (only possible once no employee holds it)"
+              className={`flex shrink-0 items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+                confirmingDeleteId === role.id
+                  ? 'border-red-400 bg-red-50 text-red-700'
+                  : 'border-zinc-200 text-zinc-400 hover:border-red-200 hover:text-red-600 dark:border-zinc-700'
+              }`}
+            >
+              <Trash2 size={12} />
+              <span className="hidden sm:inline">{confirmingDeleteId === role.id ? 'Confirm?' : 'Delete'}</span>
             </button>
           </div>
         ))}
