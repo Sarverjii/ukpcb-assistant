@@ -18,6 +18,7 @@ import {
   stripExtension,
   submitFile,
   validateFile,
+  type OcrProgress,
 } from '@/lib/documents/uploadClient';
 import { useUploadQueue, type QueueItem } from '@/components/documents/UploadQueueContext';
 import { DepartmentCheckboxList } from '@/components/shared/DepartmentCheckboxList';
@@ -209,6 +210,10 @@ function SingleUpload({
   const [clearanceLevel, setClearanceLevel] = useState('');
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(validationError);
+  // Set only for a scanned PDF mid-OCR — see pollUntilSettled's own
+  // comment. Null for every ordinary document, including for a moment
+  // right after upload before the first status poll lands.
+  const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -240,8 +245,9 @@ function SingleUpload({
     }
 
     setStatus(result.status as Status);
-    await pollUntilSettled(result.id, (s, procError) => {
+    await pollUntilSettled(result.id, (s, procError, ocr) => {
       setStatus(s as Status);
+      setOcrProgress(ocr ?? null);
       if (s === 'FAILED' && procError) setError(procError);
     });
     onUploadingChange?.(false);
@@ -339,7 +345,7 @@ function SingleUpload({
             + Add another file (bulk upload)
           </button>
         )}
-        {status !== 'idle' && <StatusPill status={status} />}
+        {status !== 'idle' && <StatusPill status={status} ocrProgress={ocrProgress} />}
       </div>
     </form>
   );
@@ -545,12 +551,20 @@ const STATUS_LABELS: Record<string, string> = {
   FAILED: 'Processing failed',
 };
 
-function StatusPill({ status }: { status: Status }) {
+function StatusPill({ status, ocrProgress }: { status: Status; ocrProgress?: OcrProgress | null }) {
+  // A scanned PDF can take multiple processing passes (see
+  // pipeline.ts's own comment) — "Processing…" alone would look stuck for
+  // however long that takes, so this shows real page-by-page progress
+  // instead whenever it's available.
+  const label =
+    status === 'PROCESSING' && ocrProgress
+      ? `Processing — reading scanned page ${Math.min(ocrProgress.done + 1, ocrProgress.total)} of ${ocrProgress.total}…`
+      : (STATUS_LABELS[status] ?? status);
   return (
     <span
       className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-medium ${STATUS_STYLES[status] ?? ''}`}
     >
-      {STATUS_LABELS[status] ?? status}
+      {label}
     </span>
   );
 }

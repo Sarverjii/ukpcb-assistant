@@ -59,4 +59,26 @@ export interface LLMProvider {
   // not the full RAG-shaped generateAnswer path, since by construction
   // there's no authorized document content relevant to this call at all.
   generalKnowledgeFallback(question: string): Promise<string | null>;
+
+  // OCR for one scanned document page — used only by
+  // lib/documents/pipeline.ts, when a PDF page's extracted text comes back
+  // empty (a scanned image with no text layer at all, as opposed to a
+  // normal PDF's real text layer). Reuses whichever LLM provider is
+  // already configured/active for chat rather than a separate "OCR
+  // provider" setting — every provider this app supports implements this,
+  // since the whole point is that OCR works no matter which of the four
+  // Admin -> AI Models providers is currently active. `prompt` is the
+  // transcription instruction (see PDF_OCR_PROMPT in pipeline.ts);
+  // `imageBuffer`/`mimeType` are the rasterized page. Returns the raw
+  // transcribed text — the caller chunks/embeds it exactly like any other
+  // extracted text, so a scanned document behaves identically to a normal
+  // one everywhere downstream of this call.
+  //
+  // Quality depends entirely on the active model actually supporting
+  // vision. Gemini/OpenAI/Anthropic's mainstream chat models all do; for
+  // Ollama specifically, it depends on which model was pulled (llava,
+  // qwen2-vl, gemma3, etc. do; a plain text model doesn't) — this app has
+  // no way to verify that ahead of time, so a text-only Ollama model will
+  // just produce a poor or empty transcription rather than a clear error.
+  transcribeImage(imageBuffer: Buffer, mimeType: string, prompt: string): Promise<string>;
 }

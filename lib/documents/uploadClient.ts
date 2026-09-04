@@ -104,16 +104,26 @@ export async function submitFile(
   return res.ok ? data : { error: data.error ?? 'Upload failed.' };
 }
 
-/** Polls a document's processing status until it settles, for status UI. */
+export type OcrProgress = { done: number; total: number };
+
+/**
+ * Polls a document's processing status until it settles, for status UI.
+ * Each poll hits the same status route whose GET handler itself nudges a
+ * stalled multi-pass OCR scan forward (see that route's own comment) — this
+ * function doesn't need any OCR-specific logic of its own to make that
+ * happen, it just needs to keep polling, which it already did before OCR
+ * existed. `ocr` is null for every non-scanned document.
+ */
 export async function pollUntilSettled(
   documentId: string,
-  onUpdate: (status: string, processingError?: string) => void,
+  onUpdate: (status: string, processingError?: string, ocr?: OcrProgress | null) => void,
 ): Promise<void> {
   return new Promise((resolve) => {
     const interval = setInterval(async () => {
       const res = await fetch(`/api/documents/${documentId}/status`);
       const data = await res.json();
-      onUpdate(data.status, data.processingError);
+      const ocr: OcrProgress | null = data.ocrPagesTotal != null ? { done: data.ocrPagesDone ?? 0, total: data.ocrPagesTotal } : null;
+      onUpdate(data.status, data.processingError, ocr);
       if (data.status === 'READY' || data.status === 'FAILED') {
         clearInterval(interval);
         resolve();

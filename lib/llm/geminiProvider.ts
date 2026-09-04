@@ -239,4 +239,37 @@ export class GeminiLLMProvider implements LLMProvider {
     });
     return sanitizeGeneralKnowledgeFallback(response.text ?? '');
   }
+
+  // See LLMProvider.transcribeImage's own comment. A short, local 503-retry
+  // (measured: Gemini's free tier occasionally 503s under demand — same
+  // reasoning as callWithRetry above) but deliberately no fallback-model
+  // switch: unlike a chat answer, a bad OCR transcription doesn't need a
+  // "smarter model" rescue, and the pipeline's own multi-pass budget
+  // (pipeline.ts's PASS_BUDGET_MS) already tolerates one page failing
+  // without losing the rest of the document.
+  async transcribeImage(imageBuffer: Buffer, mimeType: string, prompt: string, attempt = 0): Promise<string> {
+    try {
+      const response = await this.getClient().models.generateContent({
+        model: this.model,
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: prompt }, { inlineData: { mimeType, data: imageBuffer.toString('base64') } }],
+          },
+        ],
+        config: { temperature: 0 },
+      });
+      return response.text ?? '';
+    } catch (err) {
+      const status = (err as { status?: number })?.status;
+      if (status === 503 && attempt < 2) {
+        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        return this.transcribeImage(imageBuffer, mimeType, prompt, attempt + 1);
+      }
+      if (status === 401 || status === 403) {
+        throw new Error('Gemini API authentication failed — check the saved API key.');
+      }
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  }
 }

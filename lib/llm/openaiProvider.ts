@@ -144,4 +144,44 @@ export class OpenAILLMProvider implements LLMProvider {
     const text = await this.chat([{ role: 'user', content: buildGeneralKnowledgeFallbackPrompt(question) }], 600);
     return sanitizeGeneralKnowledgeFallback(text);
   }
+
+  // See LLMProvider.transcribeImage's own comment. Chat Completions'
+  // multimodal content shape: a message's `content` becomes an array of
+  // parts instead of a bare string, with the image passed as a data URL —
+  // OpenAI's API doesn't take raw base64 + a separate mime-type field the
+  // way Gemini/Anthropic do.
+  async transcribeImage(imageBuffer: Buffer, mimeType: string, prompt: string): Promise<string> {
+    const dataUrl = `data:${mimeType};base64,${imageBuffer.toString('base64')}`;
+    let res: Response;
+    try {
+      res = await fetch(CHAT_URL, {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify({
+          model: this.model,
+          temperature: 0,
+          max_tokens: 2048,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: prompt },
+                { type: 'image_url', image_url: { url: dataUrl } },
+              ],
+            },
+          ],
+        }),
+      });
+    } catch {
+      throw new Error('Could not reach the OpenAI API — check network connectivity.');
+    }
+    const data = (await res.json().catch(() => ({}))) as OpenAIChatResponse;
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('OpenAI API authentication failed — check the saved API key.');
+    }
+    if (!res.ok) {
+      throw new Error(`OpenAI API error: ${data.error?.message ?? res.statusText}`);
+    }
+    return data.choices?.[0]?.message?.content ?? '';
+  }
 }

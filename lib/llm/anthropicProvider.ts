@@ -157,4 +157,39 @@ export class AnthropicLLMProvider implements LLMProvider {
       throw mapAnthropicError(err);
     }
   }
+
+  // See LLMProvider.transcribeImage's own comment. Anthropic's image
+  // content block wants raw base64 + an explicit media_type, unlike
+  // OpenAI's single data-URL string.
+  async transcribeImage(imageBuffer: Buffer, mimeType: string, prompt: string): Promise<string> {
+    try {
+      const response = await this.getClient().messages.create({
+        model: this.model,
+        max_tokens: 2048,
+        temperature: 0,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: {
+                  type: 'base64',
+                  media_type: mimeType as 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif',
+                  data: imageBuffer.toString('base64'),
+                },
+              },
+              { type: 'text', text: prompt },
+            ],
+          },
+        ],
+      });
+      return response.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('');
+    } catch (err) {
+      throw mapAnthropicError(err);
+    }
+  }
 }

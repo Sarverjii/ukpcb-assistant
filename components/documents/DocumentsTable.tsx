@@ -28,6 +28,10 @@ export type DocumentRow = {
   // Set only for a document added by pasting a URL — see
   // addDocumentFromUrlAction's own comment.
   sourceUrl: string | null;
+  // Set only for a scanned PDF mid-OCR — see Document.ocrPagesTotal's own
+  // schema comment. Both null for every ordinary document.
+  ocrPagesTotal: number | null;
+  ocrPagesDone: number | null;
 };
 type Role = { hierarchyRank: number; name: string };
 
@@ -271,7 +275,7 @@ function DocumentRow({
         />
       </td>
       <td className="px-3 py-2">
-        <StatusPill status={doc.status} />
+        <StatusPill status={doc.status} ocrPagesTotal={doc.ocrPagesTotal} ocrPagesDone={doc.ocrPagesDone} />
       </td>
       <td className="px-3 py-2 whitespace-nowrap text-zinc-500">
         <LocalTime iso={doc.updatedAt} />
@@ -325,10 +329,25 @@ const STATUS_STYLES: Record<string, string> = {
   FAILED: 'bg-red-100 text-red-700',
 };
 
-function StatusPill({ status }: { status: string }) {
+function StatusPill({
+  status,
+  ocrPagesTotal,
+  ocrPagesDone,
+}: {
+  status: string;
+  ocrPagesTotal?: number | null;
+  ocrPagesDone?: number | null;
+}) {
+  // See UploadForm.tsx's matching StatusPill comment — a scanned PDF can
+  // take multiple processing passes, so "PROCESSING" alone would look
+  // stuck for however long that takes.
+  const label =
+    status === 'PROCESSING' && ocrPagesTotal
+      ? `OCR ${Math.min((ocrPagesDone ?? 0) + 1, ocrPagesTotal)}/${ocrPagesTotal}`
+      : status;
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[status] ?? ''}`}>
-      {status}
+      {label}
     </span>
   );
 }

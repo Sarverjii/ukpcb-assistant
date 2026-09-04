@@ -200,4 +200,36 @@ export class OllamaLLMProvider implements LLMProvider {
     }
     return sanitizeGeneralKnowledgeFallback(data.message?.content ?? '');
   }
+
+  // See LLMProvider.transcribeImage's own comment, including the caveat
+  // about result quality depending on whether the pulled model actually
+  // supports vision. Ollama's `/api/chat` takes images as a plain array of
+  // base64 strings on the message — no mime-type field at all (unlike
+  // every hosted provider), so `mimeType` is unused here on purpose.
+  async transcribeImage(imageBuffer: Buffer, _mimeType: string, prompt: string): Promise<string> {
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: this.model,
+          messages: [{ role: 'user', content: prompt, images: [imageBuffer.toString('base64')] }],
+          stream: false,
+          options: { temperature: 0 },
+        }),
+      });
+    } catch {
+      throw new Error(`Could not reach Ollama at ${this.baseUrl}. Is it running?`);
+    }
+
+    const data = (await res.json()) as OllamaChatResponse;
+    if (!res.ok || data.error) {
+      throw new Error(
+        `Ollama error: ${data.error ?? res.statusText}. If "${this.model}" doesn't support image input, ` +
+          `pull a vision-capable model instead (e.g. \`ollama pull llava\`).`,
+      );
+    }
+    return data.message?.content ?? '';
+  }
 }

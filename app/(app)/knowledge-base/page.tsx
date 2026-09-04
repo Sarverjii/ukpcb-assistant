@@ -74,6 +74,8 @@ export default async function KnowledgeBasePage() {
             createdAt: d.createdAt.toISOString(),
             updatedAt: d.updatedAt.toISOString(),
             sourceUrl: d.sourceUrl,
+            ocrPagesTotal: d.ocrPagesTotal,
+            ocrPagesDone: d.ocrPagesDone,
           }))}
           useClientUpload={config.STORAGE_PROVIDER === 'vercel-blob'}
           uploadMaxMb={config.UPLOAD_MAX_MB}

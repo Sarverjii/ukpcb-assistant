@@ -358,3 +358,21 @@ export async function updateChunkEmbeddings(
     { timeout: 45_000 },
   );
 }
+
+/**
+ * Every page number that already has at least one chunk for a document —
+ * used only by lib/documents/pipeline.ts to resume a multi-pass OCR run:
+ * a page in this set was already transcribed (or, for a normal PDF page,
+ * already had real extractable text) in an earlier pass, so a later pass
+ * skips it rather than re-transcribing and re-embedding it. Deliberately a
+ * Set of page numbers, not chunk ids — a page can span several chunks, and
+ * "is this page done" is the only question the pipeline needs answered.
+ */
+export async function listExistingChunkPageNumbers(documentId: string): Promise<Set<number>> {
+  const rows = await prisma.documentChunk.findMany({
+    where: { documentId, pageNumber: { not: null } },
+    select: { pageNumber: true },
+    distinct: ['pageNumber'],
+  });
+  return new Set(rows.map((r) => r.pageNumber!));
+}

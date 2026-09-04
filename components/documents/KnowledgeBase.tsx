@@ -74,6 +74,29 @@ export function KnowledgeBase({
     return () => clearInterval(interval);
   }, [uploading, router]);
 
+  // A scanned PDF's OCR can take several processing passes (see
+  // lib/documents/pipeline.ts's own comment) — each pass only resumes when
+  // something hits that document's status endpoint (that GET is what
+  // nudges a stalled pass forward, see the status route's own comment).
+  // The `uploading` effect above only covers THIS browser tab's own active
+  // upload session; without this, a scan that outlives that session (the
+  // uploader navigates away, or someone else just opens this page later)
+  // would sit stalled until someone happened to poll it some other way.
+  // Simply having this page open is enough to keep any visible PROCESSING
+  // document moving, matching this component's own stated design goal of
+  // staying accurate "no matter when you come back to look."
+  const processingIds = documents.filter((d) => d.status === 'PROCESSING').map((d) => d.id);
+  const processingKey = processingIds.join(',');
+  useEffect(() => {
+    if (!processingKey) return;
+    const ids = processingKey.split(',');
+    const interval = setInterval(() => {
+      for (const id of ids) fetch(`/api/documents/${id}/status`).catch(() => {});
+      router.refresh();
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [processingKey, router]);
+
   const tabs: { id: TabId; label: string; icon: typeof Upload; count?: number }[] = [
     { id: 'upload', label: 'Add content', icon: Upload },
     { id: 'documents', label: 'Documents', icon: Files, count: fileDocuments.length },

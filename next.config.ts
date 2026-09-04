@@ -17,7 +17,13 @@ const nextConfig: NextConfig = {
   // Cannot find module '.../pdf.worker.mjs'". Found this by actually
   // uploading real PDFs at volume (all 20/20 in the test batch failed
   // identically), not by anticipating it — same fix as transformers above.
-  serverExternalPackages: ['@huggingface/transformers', 'pdf-parse'],
+  // @napi-rs/canvas (used by lib/documents/pdfRasterize.ts, for scanned-
+  // document OCR) ships a native .node addon selected at runtime by
+  // platform via js-binding.js's own require() calls — Turbopack can't
+  // place a native addon inside an ESM chunk at all ("non-ecmascript
+  // placeable asset"), the same fundamental issue as onnxruntime-node
+  // below, just caught at build time instead of only in production.
+  serverExternalPackages: ['@huggingface/transformers', 'pdf-parse', '@napi-rs/canvas'],
   // Vercel's build only deploys the files its file-tracer (@vercel/nft)
   // can statically determine a route actually needs — not the full
   // node_modules tree. onnxruntime-node's native addon selects its

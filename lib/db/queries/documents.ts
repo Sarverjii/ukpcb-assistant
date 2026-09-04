@@ -231,3 +231,58 @@ export async function listIngestedSourceUrls(): Promise<string[]> {
   });
   return rows.map((r) => r.sourceUrl!);
 }
+
+/**
+ * Records OCR progress on a document — see Document.ocrPagesTotal/
+ * ocrPagesDone's own schema comment. `total` is only ever passed on the
+ * FIRST pass that discovers scanned pages (subsequent passes call this
+ * with only `done` advancing); `updatedAt` bumping on every call is what
+ * lets the status route's idle-nudge (see that route's own comment) tell
+ * "a pass just made progress" apart from "a pass is genuinely stalled."
+ */
+export function setOcrProgress(id: string, done: number, total: number) {
+  return prisma.document.update({
+    where: { id },
+    data: { ocrPagesDone: done, ocrPagesTotal: total },
+  });
+}
+
+// A lock older than this is treated as abandoned (the invocation holding
+// it crashed, or was killed by the platform mid-pass, before reaching its
+// own release) rather than genuinely still running — comfortably longer
+// than pipeline.ts's own PASS_BUDGET_MS (40s) plus the request overhead
+// around it, so a real, still-active pass never looks stale here.
+const LOCK_STALE_MS = 55_000;
+
+/**
+ * A real hold-for-the-duration lock — see Document.processingClaimedAt's
+ * own schema comment for why an updatedAt-based compare-and-swap wasn't
+ * enough on its own: that only stops two invocations from racing on the
+ * exact same instant, not one invocation claiming a document a second
+ * later while an earlier pass is still legitimately mid-flight on a
+ * single page's vision-model call (which takes several real seconds, with
+ * no DB write happening until it returns). Confirmed as a real,
+ * reproduced bug either way — one real test run produced ~4x the expected
+ * chunk count for a single page from exactly this race.
+ *
+ * Claims by setting processingClaimedAt to now() ONLY if it's currently
+ * null or older than LOCK_STALE_MS — every other write during a pass
+ * (setOcrProgress, etc.) does NOT touch this column, so the lock stays
+ * held for the pass's whole duration regardless of how many separate
+ * writes happen. Pair with releaseDocumentProcessingClaim() in a finally
+ * block so a pass that finishes cleanly (for any reason: done, failed, or
+ * out of budget) frees the lock immediately rather than making the next
+ * legitimate continuation wait out the full staleness window.
+ */
+export async function claimDocumentForProcessing(id: string): Promise<boolean> {
+  const staleBefore = new Date(Date.now() - LOCK_STALE_MS);
+  const result = await prisma.document.updateMany({
+    where: { id, OR: [{ processingClaimedAt: null }, { processingClaimedAt: { lt: staleBefore } }] },
+    data: { processingClaimedAt: new Date() },
+  });
+  return result.count > 0;
+}
+
+export async function releaseDocumentProcessingClaim(id: string): Promise<void> {
+  await prisma.document.update({ where: { id }, data: { processingClaimedAt: null } });
+}
