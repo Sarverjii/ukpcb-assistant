@@ -12,6 +12,7 @@ import {
   updateUserStatus,
   updateUserPasswordHash,
   updateUserDepartments,
+  updateUserMessageLimitOverride,
   getUserById,
   getRoleById,
   listRolesByRank,
@@ -104,6 +105,41 @@ export async function changeEmployeeDepartmentsAction(
     userId: ctx.userId,
     resource: userId,
     metadata: { employeeName: before.name, employeeEmail: before.email, newDepartmentCount: departmentIds.length },
+  });
+  revalidatePath('/admin/employees');
+  return {};
+}
+
+/**
+ * Sets (or clears) one employee's individual daily-chat-message-limit
+ * override — see User.dailyMessageLimitOverride's own schema comment. No
+ * self-modification restriction, same reasoning as
+ * changeEmployeeDepartmentsAction above: unlike role/clearance, this
+ * isn't a privilege-escalation vector — an admin lowering or raising
+ * their OWN message quota can't reach anything they weren't already
+ * authorized to see.
+ */
+export async function changeEmployeeMessageLimitAction(userId: string, limit: number | null): Promise<ActionResult> {
+  const ctx = await getAuthContext();
+  await requireAdmin(ctx);
+
+  if (limit !== null && (!Number.isInteger(limit) || limit < 1)) {
+    return { error: 'Daily message limit must be a positive whole number, or blank to inherit the role default.' };
+  }
+
+  const before = await getUserById(userId);
+  await updateUserMessageLimitOverride(userId, limit);
+  await logAuditEvent({
+    action: 'USAGE_LIMIT_CONFIG_CHANGED',
+    result: 'SUCCESS',
+    userId: ctx.userId,
+    resource: userId,
+    metadata: {
+      scope: 'USER',
+      targetName: before.name,
+      oldLimit: before.dailyMessageLimitOverride,
+      newLimit: limit,
+    },
   });
   revalidatePath('/admin/employees');
   return {};

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Pencil, Check, X, Crown, Layers, Trash2 } from 'lucide-react';
+import { Pencil, Check, X, Crown, Layers, Trash2, MessageSquare } from 'lucide-react';
 import { updateDepartmentAction, deleteDepartmentAction } from '@/app/(app)/admin/departments/actions';
 
 type Member = { id: string; name: string };
@@ -24,6 +24,7 @@ export function DepartmentDetailHeader({
   description,
   headUserId,
   isHeadDepartment,
+  dailyMessageLimit,
   members,
 }: {
   departmentId: string;
@@ -31,6 +32,9 @@ export function DepartmentDetailHeader({
   description: string | null;
   headUserId: string | null;
   isHeadDepartment: boolean;
+  // See Department.dailyMessageLimit's own schema comment — null means no
+  // department-level cap at all, the default for every department.
+  dailyMessageLimit: number | null;
   members: Member[];
 }) {
   const router = useRouter();
@@ -39,6 +43,7 @@ export function DepartmentDetailHeader({
   const [descriptionValue, setDescriptionValue] = useState(description ?? '');
   const [headValue, setHeadValue] = useState(headUserId ?? '');
   const [headDeptValue, setHeadDeptValue] = useState(isHeadDepartment);
+  const [limitValue, setLimitValue] = useState(dailyMessageLimit === null ? '' : String(dailyMessageLimit));
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -49,12 +54,18 @@ export function DepartmentDetailHeader({
   function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    const trimmedLimit = limitValue.trim();
+    if (trimmedLimit && (!Number.isInteger(Number(trimmedLimit)) || Number(trimmedLimit) < 1)) {
+      setError('Daily message limit must be a positive whole number, or blank for no department cap.');
+      return;
+    }
     startTransition(async () => {
       const result = await updateDepartmentAction(departmentId, {
         name: nameValue,
         description: descriptionValue.trim() || null,
         headUserId: headValue || null,
         isHeadDepartment: headDeptValue,
+        dailyMessageLimit: trimmedLimit ? Number(trimmedLimit) : null,
       });
       if (result.error) {
         setError(result.error);
@@ -69,6 +80,7 @@ export function DepartmentDetailHeader({
     setDescriptionValue(description ?? '');
     setHeadValue(headUserId ?? '');
     setHeadDeptValue(isHeadDepartment);
+    setLimitValue(dailyMessageLimit === null ? '' : String(dailyMessageLimit));
     setError(null);
     setEditing(false);
   }
@@ -115,6 +127,12 @@ export function DepartmentDetailHeader({
                 <Crown size={14} className="text-amber-500" /> Headed by {currentHead.name}
               </p>
             )}
+            <p className="mt-2 flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-300">
+              <MessageSquare size={14} className="text-zinc-400" />
+              {dailyMessageLimit !== null
+                ? `${dailyMessageLimit} messages/day department budget`
+                : 'No department-wide message budget — each member uses their own limit'}
+            </p>
           </div>
           <button
             type="button"
@@ -188,6 +206,23 @@ export function DepartmentDetailHeader({
         {members.length === 0 && (
           <span className="text-xs text-zinc-400">Add a member below before you can set a head.</span>
         )}
+      </label>
+
+      <label className="flex flex-col gap-1.5 text-sm">
+        <span className="font-medium text-zinc-700 dark:text-zinc-300">Daily message budget (optional)</span>
+        <input
+          type="number"
+          min={1}
+          value={limitValue}
+          onChange={(e) => setLimitValue(e.target.value)}
+          placeholder="Blank = no department-wide cap"
+          className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm"
+        />
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          An aggregate chat-message limit across every member of this department combined, on top of
+          (not instead of) each member&apos;s own individual limit. Leave blank unless this
+          department needs a tighter, explicit cost budget.
+        </span>
       </label>
 
       <label className="flex items-start gap-2.5 rounded-md border border-zinc-200 dark:border-zinc-700 p-3 text-sm">

@@ -50,7 +50,13 @@ export async function createDepartmentAction(formData: FormData): Promise<Action
  */
 export async function updateDepartmentAction(
   departmentId: string,
-  changes: { name?: string; description?: string | null; headUserId?: string | null; isHeadDepartment?: boolean },
+  changes: {
+    name?: string;
+    description?: string | null;
+    headUserId?: string | null;
+    isHeadDepartment?: boolean;
+    dailyMessageLimit?: number | null;
+  },
 ): Promise<ActionResult> {
   const ctx = await getAuthContext();
   await requireAdmin(ctx);
@@ -85,6 +91,15 @@ export async function updateDepartmentAction(
       userId: ctx.userId,
       resource: departmentId,
       metadata: { departmentName: before.name, isHeadDepartment: changes.isHeadDepartment },
+    });
+  }
+  if (changes.dailyMessageLimit !== undefined && changes.dailyMessageLimit !== before.dailyMessageLimit) {
+    await logAuditEvent({
+      action: 'USAGE_LIMIT_CONFIG_CHANGED',
+      result: 'SUCCESS',
+      userId: ctx.userId,
+      resource: departmentId,
+      metadata: { scope: 'DEPARTMENT', targetName: before.name, oldLimit: before.dailyMessageLimit, newLimit: changes.dailyMessageLimit },
     });
   }
   revalidatePath('/admin/departments');

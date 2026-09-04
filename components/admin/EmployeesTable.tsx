@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   changeEmployeeRoleAction,
   changeEmployeeDepartmentsAction,
+  changeEmployeeMessageLimitAction,
   toggleEmployeeStatusAction,
   resetEmployeePasswordAction,
   removeEmployeeAction,
@@ -29,8 +30,11 @@ type User = {
   roleName: string;
   status: 'ACTIVE' | 'DISABLED' | 'REMOVED';
   lastLoginAt: string | null;
+  // See User.dailyMessageLimitOverride's own schema comment — null means
+  // this employee inherits their role's defaultDailyMessageLimit.
+  dailyMessageLimitOverride: number | null;
 };
-type Role = { id: string; name: string };
+type Role = { id: string; name: string; defaultDailyMessageLimit: number };
 
 export function EmployeesTable({
   users,
@@ -105,6 +109,7 @@ export function EmployeesTable({
               <th className="px-3 py-2">Email</th>
               <th className="px-3 py-2">Department</th>
               <th className="px-3 py-2">Role / Clearance</th>
+              <th className="px-3 py-2">Msg limit/day</th>
               <th className="px-3 py-2">Status</th>
               <th className="px-3 py-2">Last login</th>
               <th className="px-3 py-2">Actions</th>
@@ -122,7 +127,7 @@ export function EmployeesTable({
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-3 py-4 text-center text-zinc-400">
+                <td colSpan={8} className="px-3 py-4 text-center text-zinc-400">
                   No employees match your search.
                 </td>
               </tr>
@@ -152,6 +157,10 @@ function EmployeeRow({
   const [reauthAction, setReauthAction] = useState<ReauthAction | null>(null);
   const [previewEmail, setPreviewEmail] = useState<ComposedEmail | null>(null);
   const [departmentIds, setDepartmentIds] = useState(user.departments.map((d) => d.id));
+  const [limitInput, setLimitInput] = useState(
+    user.dailyMessageLimitOverride === null ? '' : String(user.dailyMessageLimitOverride),
+  );
+  const roleDefault = roles.find((r) => r.id === user.roleId)?.defaultDailyMessageLimit ?? null;
 
   function handleRoleChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const roleId = e.target.value;
@@ -167,6 +176,19 @@ function EmployeeRow({
     setError(null);
     startTransition(async () => {
       const result = await changeEmployeeDepartmentsAction(user.id, ids);
+      if (result.error) setError(result.error);
+    });
+  }
+
+  function saveLimitOverride() {
+    const trimmed = limitInput.trim();
+    if (trimmed && (!Number.isInteger(Number(trimmed)) || Number(trimmed) < 1)) {
+      setError('Daily message limit must be a positive whole number, or blank to inherit the role default.');
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      const result = await changeEmployeeMessageLimitAction(user.id, trimmed ? Number(trimmed) : null);
       if (result.error) setError(result.error);
     });
   }
@@ -213,6 +235,22 @@ function EmployeeRow({
             </option>
           ))}
         </select>
+      </td>
+      <td className="px-3 py-2">
+        <input
+          type="number"
+          min={1}
+          value={limitInput}
+          onChange={(e) => setLimitInput(e.target.value)}
+          onBlur={saveLimitOverride}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') e.currentTarget.blur();
+          }}
+          disabled={pending}
+          placeholder={roleDefault !== null ? `${roleDefault} (role default)` : '—'}
+          title="Leave blank to use the role's default daily message limit"
+          className="w-32 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-xs disabled:opacity-50"
+        />
       </td>
       <td className="px-3 py-2">
         <span

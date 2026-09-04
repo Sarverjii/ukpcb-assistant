@@ -40,7 +40,9 @@ export type AuditAction =
   | 'PASSWORD_CHANGE_FAILED'
   | 'ROLE_CREATED'
   | 'ROLE_HIERARCHY_CHANGED'
-  | 'ACCESS_DENIED';
+  | 'ACCESS_DENIED'
+  | 'USAGE_LIMIT_EXCEEDED'
+  | 'USAGE_LIMIT_CONFIG_CHANGED';
 
 export type AuditResult = 'SUCCESS' | 'DENIED' | 'ERROR';
 

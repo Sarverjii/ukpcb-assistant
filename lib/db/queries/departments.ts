@@ -49,7 +49,17 @@ export function createDepartment(name: string) {
  */
 export function updateDepartment(
   id: string,
-  data: { name?: string; description?: string | null; headUserId?: string | null; isHeadDepartment?: boolean },
+  data: {
+    name?: string;
+    description?: string | null;
+    headUserId?: string | null;
+    isHeadDepartment?: boolean;
+    // See Department.dailyMessageLimit's own schema comment — undefined
+    // means "not part of this save", null means "explicitly clear the
+    // cap" (back to no department-level limit), same convention as
+    // headUserId above.
+    dailyMessageLimit?: number | null;
+  },
 ) {
   return prisma.department.update({ where: { id }, data });
 }

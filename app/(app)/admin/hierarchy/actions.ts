@@ -130,6 +130,40 @@ export async function deleteRoleAction(roleId: string): Promise<ActionResult> {
   return {};
 }
 
+/**
+ * Sets a role's default daily chat-message limit — see
+ * Role.defaultDailyMessageLimit's own schema comment. Deliberately no
+ * "unlimited" option: must be a positive integer, same as every other
+ * level of this feature.
+ */
+export async function setRoleMessageLimitAction(roleId: string, limit: number): Promise<ActionResult> {
+  const ctx = await getAuthContext();
+  await requireAdmin(ctx);
+
+  if (!Number.isInteger(limit) || limit < 1) {
+    return { error: 'Daily message limit must be a positive whole number.' };
+  }
+
+  const before = await prisma.role.findUniqueOrThrow({ where: { id: roleId } });
+  await prisma.role.update({ where: { id: roleId }, data: { defaultDailyMessageLimit: limit } });
+
+  await logAuditEvent({
+    action: 'USAGE_LIMIT_CONFIG_CHANGED',
+    result: 'SUCCESS',
+    userId: ctx.userId,
+    resource: roleId,
+    metadata: {
+      scope: 'ROLE',
+      targetName: before.name,
+      oldLimit: before.defaultDailyMessageLimit,
+      newLimit: limit,
+    },
+  });
+
+  revalidatePath('/admin/hierarchy');
+  return {};
+}
+
 export async function toggleRoleCapabilityAction(
   roleId: string,
   field: 'canUploadDocuments' | 'isAdmin',

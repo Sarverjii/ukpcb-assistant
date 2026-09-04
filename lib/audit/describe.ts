@@ -237,6 +237,26 @@ export function describeAuditEvent(
       if (resource === 'documents:manage') return 'Blocked: tried to manage a document above their clearance';
       return resource ? `Blocked: access denied for ${resource}` : 'Blocked: access denied';
     }
+    case 'USAGE_LIMIT_EXCEEDED': {
+      const scope = str(m.scope);
+      const limit = num(m.limit);
+      const used = num(m.used);
+      const deptName = str(m.departmentName);
+      const scopeLabel = scope === 'ORG' ? 'company-wide' : scope === 'DEPARTMENT' ? (deptName ?? 'department') : 'their own';
+      return limit !== null
+        ? `Blocked: hit the ${scopeLabel} daily message limit (${used ?? '?'}/${limit})`
+        : 'Blocked: hit a daily message limit';
+    }
+    case 'USAGE_LIMIT_CONFIG_CHANGED': {
+      const scope = str(m.scope);
+      const limit = num(m.newLimit);
+      const target = str(m.targetName);
+      if (scope === 'ORG') return limit !== null ? `Set the company-wide daily message limit to ${limit}` : 'Changed the company-wide daily message limit';
+      if (scope === 'DEPARTMENT') return `Set ${target ?? 'a department'}'s daily message limit to ${limit === null ? 'unset' : limit}`;
+      if (scope === 'ROLE') return `Set ${target ?? 'a role'}'s default daily message limit to ${limit ?? 'unset'}`;
+      if (scope === 'USER') return `Set ${target ?? 'an employee'}'s daily message limit override to ${limit === null ? 'unset (inherit role default)' : limit}`;
+      return 'Changed a usage limit';
+    }
 
     default:
       return action

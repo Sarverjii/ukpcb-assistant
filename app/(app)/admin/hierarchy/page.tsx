@@ -18,6 +18,7 @@ export default async function HierarchyPage() {
           hierarchyRank: r.hierarchyRank,
           canUploadDocuments: r.canUploadDocuments,
           isAdmin: r.isAdmin,
+          defaultDailyMessageLimit: r.defaultDailyMessageLimit,
         }))}
       />
     </div>

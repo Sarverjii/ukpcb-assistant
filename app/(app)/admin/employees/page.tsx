@@ -53,8 +53,9 @@ export default async function EmployeesPage() {
           roleName: u.role.name,
           status: u.status,
           lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
+          dailyMessageLimitOverride: u.dailyMessageLimitOverride,
         }))}
-        roles={roles.map((r) => ({ id: r.id, name: r.name }))}
+        roles={roles.map((r) => ({ id: r.id, name: r.name, defaultDailyMessageLimit: r.defaultDailyMessageLimit }))}
         departments={departments.map((d) => ({ id: d.id, name: d.name }))}
         currentUserId={ctx.userId}
       />

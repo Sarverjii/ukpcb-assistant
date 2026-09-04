@@ -34,6 +34,7 @@ export default async function DepartmentDetailPage({
         description={dept.description}
         headUserId={dept.headUserId}
         isHeadDepartment={dept.isHeadDepartment}
+        dailyMessageLimit={dept.dailyMessageLimit}
         members={dept.users.map((u) => ({ id: u.id, name: u.name }))}
       />
 

@@ -17,6 +17,7 @@ import { getChunkForUser } from '@/lib/db/queries/chunks';
 import { logAuditEvent } from '@/lib/audit/log';
 import { prisma } from '@/lib/db/prisma';
 import { answerQuestion } from '@/lib/rag/chat';
+import { checkAndConsumeUsage } from '@/lib/usage/limits';
 import type { ChatTurn } from '@/lib/llm/types';
 
 export type DeleteConversationResult = { error?: string };
@@ -180,6 +181,11 @@ function autoTitle(question: string): string {
 
 export async function sendMessage(conversationId: string, question: string) {
   const ctx = await getAuthContext();
+  // Checked and CONSUMED before anything else — see
+  // lib/usage/limits.ts's module comment. Throws UsageLimitExceededError
+  // (a plain Error subclass) straight through to the caller, same as
+  // every other failure in this non-streaming path.
+  await checkAndConsumeUsage({ userId: ctx.userId, departmentIds: ctx.departmentIds });
 
   // Ownership check happens inside the query itself (WHERE userId = ...),
   // not by fetching-then-checking — same principle as chunk retrieval.
@@ -234,6 +240,7 @@ export async function createConversationAndSendMessage(question: string) {
  */
 export async function regenerateMessage(conversationId: string, assistantMessageId: string) {
   const ctx = await getAuthContext();
+  await checkAndConsumeUsage({ userId: ctx.userId, departmentIds: ctx.departmentIds });
 
   const conversation = await getConversationForUser(conversationId, ctx.userId);
   if (!conversation) throw new Error('Conversation not found.');
@@ -267,6 +274,7 @@ export async function regenerateMessage(conversationId: string, assistantMessage
  */
 export async function editMessage(conversationId: string, messageId: string, newContent: string) {
   const ctx = await getAuthContext();
+  await checkAndConsumeUsage({ userId: ctx.userId, departmentIds: ctx.departmentIds });
 
   const conversation = await getConversationForUser(conversationId, ctx.userId);
   if (!conversation) throw new Error('Conversation not found.');

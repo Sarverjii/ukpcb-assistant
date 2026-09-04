@@ -59,16 +59,29 @@ model VerificationToken {
 // authorization system compares against — higher rank sees more. New roles
 // (e.g. "Director") are inserts, never a code change.
 model Role {
-  id                 String   @id @default(cuid())
-  name               String   @unique
-  hierarchyRank      Int      @unique
-  canUploadDocuments Boolean  @default(false)
+  id                       String   @id @default(cuid())
+  name                     String   @unique
+  hierarchyRank            Int      @unique
+  canUploadDocuments       Boolean  @default(false)
   // Gates the admin dashboard (employee management, document management
   // actions, audit log viewing) — deliberately separate from
   // canUploadDocuments so a future role could upload without full admin
   // rights, per the spec's "leave room for more granular policies" note.
-  isAdmin            Boolean  @default(false)
-  createdAt          DateTime @default(now())
+  isAdmin                  Boolean  @default(false)
+  // Default daily chat-message quota for every employee at this rank,
+  // unless User.dailyMessageLimitOverride is set for them individually.
+  // Deliberately never null/unlimited — see lib/usage/limits.ts's module
+  // comment for why every level of this feature always carries a real
+  // numeric ceiling, per an explicit request that there be no chance of
+  // an unbounded AI bill from any single employee, department, or the
+  // org as a whole. 300/day is the seeded default: generous enough that
+  // real, heavy legitimate use essentially never hits it (this app's own
+  // measured per-turn cost — condense + retrieval-embed + generate, on
+  // the currently active Gemini flash-lite pricing — runs well under
+  // $0.001/message), while still bounding one employee's worst-case
+  // daily cost to a small, known number instead of nothing.
+  defaultDailyMessageLimit Int      @default(300)
+  createdAt                DateTime @default(now())
 
   users User[]
 
@@ -107,35 +120,42 @@ enum CreationMethod {
 }
 
 model User {
-  id              String               @id @default(cuid())
-  name            String
-  email           String               @unique
-  passwordHash    String
-  roleId          String
-  role            Role                 @relation(fields: [roleId], references: [id])
+  id                        String               @id @default(cuid())
+  name                      String
+  email                     String               @unique
+  passwordHash              String
+  roleId                    String
+  role                      Role                 @relation(fields: [roleId], references: [id])
   // Zero, one, several, or every department — an implicit Prisma M2M (see
   // Department.users). Purely additive to the rank-based clearance system:
   // see DocumentChunk.departmentIds and lib/db/queries/chunks.ts for the
   // resulting "clearance OR department" visibility rule.
-  departments     Department[]
-  status          UserStatus           @default(ACTIVE)
+  departments               Department[]
+  status                    UserStatus           @default(ACTIVE)
   // Account-level, not browser-level — follows the user across devices/
   // browsers, unlike a localStorage-only preference. Defaults to LIGHT.
-  themePreference ThemePreference      @default(LIGHT)
+  themePreference           ThemePreference      @default(LIGHT)
   // Provenance: who created this account (admin, self-relation), when
   // (createdAt, already below), and how (creationMethod). Set at
   // createEmployeeAction (MANUAL) and bulkImportEmployeesAction
   // (BULK_IMPORT) time and never changed afterward — this is what makes the
   // live roster export's "Added By / At / Via" columns queryable directly,
   // with no AuditLog join required.
-  createdById     String?
-  createdBy       User?                @relation("CreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  createdUsers    User[]               @relation("CreatedBy")
-  creationMethod  CreationMethod       @default(MANUAL)
-  importBatchId   String?
-  importBatch     EmployeeImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
-  createdAt       DateTime             @default(now())
-  lastLoginAt     DateTime?
+  createdById               String?
+  createdBy                 User?                @relation("CreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdUsers              User[]               @relation("CreatedBy")
+  creationMethod            CreationMethod       @default(MANUAL)
+  importBatchId             String?
+  importBatch               EmployeeImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  createdAt                 DateTime             @default(now())
+  lastLoginAt               DateTime?
+  // Optional per-employee override of their role's own
+  // defaultDailyMessageLimit — set by an admin for a specific employee
+  // who genuinely needs a different (higher OR lower) daily chat-message
+  // ceiling than their role's baseline. Null = inherit the role's
+  // default; see Role.defaultDailyMessageLimit's own comment for why
+  // there is no "unlimited" option anywhere in this feature.
+  dailyMessageLimitOverride Int?
 
   accounts                     Account[]
   sessions                     Session[]
@@ -146,6 +166,7 @@ model User {
   importedBatches              EmployeeImportBatch[]  @relation("ImportedBy")
   headOfDepartments            Department[]           @relation("DepartmentHead")
   aiProviderCredentialsUpdated AIProviderCredential[]
+  orgUsagePoliciesUpdated      OrgUsagePolicy[]
 
   @@index([roleId])
   @@index([createdById])
@@ -193,11 +214,11 @@ model EmployeeImportBatch {
 // every affected document in the same transaction, since that denormalized
 // column isn't a foreign key and doesn't cascade on its own.
 model Department {
-  id               String   @id @default(cuid())
-  name             String   @unique
+  id                String   @id @default(cuid())
+  name              String   @unique
   // Short blurb shown on the Departments admin page and the Evon
   // Directory — purely descriptive, never authorization-relevant.
-  description      String?
+  description       String?
   // A "head department" (the user's own term) sees every document tagged
   // with ANY department, not just its own — an umbrella of visibility over
   // every other department at once, layered on top of (never a
@@ -210,7 +231,7 @@ model Department {
   // lib/db/queries/chunks.ts for the enforcement. Admin-togglable per
   // department (not hardcoded to one name), same "data, not code" spirit
   // as Role.isAdmin/canUploadDocuments.
-  isHeadDepartment Boolean  @default(false)
+  isHeadDepartment  Boolean  @default(false)
   // The department's designated lead — optional, and deliberately NOT a
   // capability or clearance boost of any kind (a head has exactly the
   // access their own Role and department memberships already grant, same
@@ -218,9 +239,20 @@ model Department {
   // Departments admin page and the Evon Directory. SetNull if that
   // employee is later hard-deleted, mirroring every other "survives with
   // a cleared reference" pattern in this schema.
-  headUserId       String?
-  head             User?    @relation("DepartmentHead", fields: [headUserId], references: [id], onDelete: SetNull)
-  createdAt        DateTime @default(now())
+  headUserId        String?
+  head              User?    @relation("DepartmentHead", fields: [headUserId], references: [id], onDelete: SetNull)
+  // Aggregate daily chat-message budget across every member of this
+  // department COMBINED — an OPTIONAL, stricter cost-center control
+  // layered on top of (never a replacement for) each member's own
+  // individual daily limit. Null (the default) means no department-level
+  // cap at all: an admin opts a department into a tighter aggregate
+  // budget deliberately, the same way a real company's finance/eng-ops
+  // team assigns an explicit team budget only where the business actually
+  // wants one, not as a blanket restriction applied to every department
+  // automatically. A member belonging to several departments counts
+  // against every one of them.
+  dailyMessageLimit Int?
+  createdAt         DateTime @default(now())
 
   users     User[]
   documents Document[]
@@ -257,19 +289,19 @@ enum DocumentStatus {
 }
 
 model Document {
-  id              String         @id @default(cuid())
-  name            String
-  description     String?
-  fileKey         String
-  mimeType        String
-  fileSizeBytes   Int
+  id                  String         @id @default(cuid())
+  name                String
+  description         String?
+  fileKey             String
+  mimeType            String
+  fileSizeBytes       Int
   // Set only for a document added by pasting a URL (see
   // lib/documents/urlFetch.ts) rather than uploading a file — the fetched
   // page's own address, kept for traceability (shown in the Knowledge
   // Base table so an admin can tell at a glance this content came from
   // the web, not from someone's machine) and as the anchor for a future
   // "re-fetch" action. Null for every ordinary file upload.
-  sourceUrl       String?
+  sourceUrl           String?
   // Storage key of a generated, clean PDF rendition — set only for a
   // non-PDF original (DOCX/PPTX/TXT/MD), null for a document that's
   // already a PDF (fileKey IS the viewable file there, nothing to
@@ -279,29 +311,29 @@ model Document {
   // which stay the true original for downloads. Regenerated by
   // lib/documents/pipeline.ts on every (re)processing pass, including a
   // file replace, so it never drifts from the current content.
-  previewFileKey  String?
+  previewFileKey      String?
   // Semantically: the minimum Role.hierarchyRank required to view this
   // document. Stored as a plain int (not a Role relation) so it survives
   // even if roles are later restructured, and so it's cheap to compare.
-  clearanceLevel  Int
+  clearanceLevel      Int
   // Zero, one, or several departments — an implicit Prisma M2M (see
   // Department.documents). Purely additive to clearanceLevel: a viewer sees
   // this document if their rank covers clearanceLevel OR they belong to any
   // department listed here. Denormalized onto DocumentChunk.departmentIds
   // at write time for the same reason clearanceRank already is — see this
   // file's module-level security note.
-  departments     Department[]
-  tags            String[]       @default([])
+  departments         Department[]
+  tags                String[]       @default([])
   // Nullable so a hard-deleted employee (see deleteEmployeePermanentlyAction)
   // never forces their documents to be deleted along with them — the FK
   // just goes to null (onDelete: SetNull) and every "uploaded by" display
   // falls back to a fixed "Removed employee" label. Deleting the document
   // itself, if that's what's wanted, is always a separate, explicit choice
   // an admin makes on the removed-employee review page beforehand.
-  uploadedById    String?
-  uploadedBy      User?          @relation("UploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
-  status          DocumentStatus @default(PENDING)
-  processingError String?
+  uploadedById        String?
+  uploadedBy          User?          @relation("UploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  status              DocumentStatus @default(PENDING)
+  processingError     String?
   // Set only while a scanned PDF (a page with no text layer at all — see
   // lib/documents/pipeline.ts's own comment) is being OCR'd: total pages
   // detected as needing OCR, and how many have been transcribed and
@@ -312,8 +344,8 @@ model Document {
   // later pass resume exactly where an earlier one left off, and let the
   // upload UI show real "page N of M" progress instead of an indefinite
   // "Processing…" for however long a long scan takes.
-  ocrPagesTotal   Int?
-  ocrPagesDone    Int?
+  ocrPagesTotal       Int?
+  ocrPagesDone        Int?
   // A real hold-for-the-duration lock (not the same thing as updatedAt,
   // which changes on every unrelated write and so can't tell "a pass is
   // still actively running" apart from "nothing has happened in a
@@ -330,8 +362,8 @@ model Document {
   // A lock older than LOCK_STALE_MS (that file) is treated as abandoned
   // (the holding invocation crashed or was killed) and can be reclaimed.
   processingClaimedAt DateTime?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
   chunks DocumentChunk[]
 
@@ -503,6 +535,68 @@ model AIProviderCredential {
 
   @@unique([capability, provider])
   @@index([capability, isActive])
+}
+
+// --- Usage limits --------------------------------------------------------
+//
+// Three levels of chat-message quota, all enforced together, all always
+// carrying a real number (never "unlimited") — see lib/usage/limits.ts for
+// the full mechanics and reasoning:
+//   1. Per-employee (Role.defaultDailyMessageLimit, overridable per User)
+//   2. Per-department, optional (Department.dailyMessageLimit)
+//   3. Org-wide (OrgUsagePolicy, below) — the final circuit breaker,
+//      independent of what any individual or department limit says.
+
+// A genuine singleton: exactly one row, at a fixed known id, upserted by
+// the admin action that edits it rather than created ad hoc — the fixed id
+// (not a real cuid) is what makes "the org policy" unambiguous to query
+// (findUnique by that id) without an isActive-style disambiguation flag,
+// unlike AIProviderCredential above (which is deliberately multi-row per
+// capability). This codebase had no prior singleton-config pattern to
+// follow, so this establishes one rather than reusing AIProviderCredential's
+// shape, which solves a different problem (many saved-but-inactive
+// credentials) than this does (exactly one org-wide number).
+model OrgUsagePolicy {
+  id                String   @id @default("org-usage-policy")
+  // The absolute ceiling on chat messages across every employee combined,
+  // per UTC day — enforced even when no single employee or department is
+  // anywhere near their own limit. 5000/day is the seeded default: at
+  // this app's currently-configured Gemini flash-lite pricing (measured
+  // this session at well under $0.001/message for a typical
+  // retrieval-augmented turn), that bounds worst-case daily spend to a
+  // few dollars regardless of how many employees exist or how the org
+  // grows, while comfortably covering realistic total usage across the
+  // whole company (roughly 89 employees today).
+  dailyMessageLimit Int      @default(5000)
+  updatedAt         DateTime @updatedAt
+  updatedById       String?
+  updatedBy         User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+enum UsageScope {
+  USER
+  DEPARTMENT
+  ORG
+}
+
+// One row per (scope, scopeId, day) — the atomic counter every quota check
+// increments. A new UTC day means a new row (created on first use via the
+// same atomic upsert that enforces the limit — see
+// lib/usage/limits.ts::atomicCheckAndIncrement), so there is deliberately
+// no reset job anywhere: yesterday's row is simply never touched again.
+// scopeId is a User.id, Department.id, or the fixed string "org" for
+// UsageScope.ORG — never a foreign key, since one column has to point at
+// three different tables depending on `scope`; every real join happens in
+// the query layer (lib/db/queries/usage.ts), not via a Prisma relation.
+model UsageCounter {
+  id      String     @id @default(cuid())
+  scope   UsageScope
+  scopeId String
+  day     DateTime   @db.Date
+  count   Int        @default(0)
+
+  @@unique([scope, scopeId, day])
+  @@index([scope, scopeId])
 }
 
 // --- Audit log ---------------------------------------------------------

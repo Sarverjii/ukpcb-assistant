@@ -138,6 +138,15 @@ export function updateUserRole(userId: string, roleId: string) {
   return prisma.user.update({ where: { id: userId }, data: { roleId } });
 }
 
+/**
+ * `limit === null` clears the override (the employee falls back to their
+ * role's defaultDailyMessageLimit) — see
+ * User.dailyMessageLimitOverride's own schema comment.
+ */
+export function updateUserMessageLimitOverride(userId: string, limit: number | null) {
+  return prisma.user.update({ where: { id: userId }, data: { dailyMessageLimitOverride: limit } });
+}
+
 export function updateUserStatus(userId: string, status: UserStatus) {
   return prisma.user.update({ where: { id: userId }, data: { status } });
 }

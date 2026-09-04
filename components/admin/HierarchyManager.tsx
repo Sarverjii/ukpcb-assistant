@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { ChevronUp, ChevronDown, Plus, ShieldCheck, Upload, Pencil, Trash2, Check, X } from 'lucide-react';
+import { ChevronUp, ChevronDown, Plus, ShieldCheck, Upload, Pencil, Trash2, Check, X, MessageSquare } from 'lucide-react';
 import {
   createRoleAction,
   moveRoleAction,
   toggleRoleCapabilityAction,
   renameRoleAction,
+  setRoleMessageLimitAction,
   deleteRoleAction,
 } from '@/app/(app)/admin/hierarchy/actions';
 
@@ -16,6 +17,7 @@ type Role = {
   hierarchyRank: number;
   canUploadDocuments: boolean;
   isAdmin: boolean;
+  defaultDailyMessageLimit: number;
 };
 
 export function HierarchyManager({ roles }: { roles: Role[] }) {
@@ -26,6 +28,13 @@ export function HierarchyManager({ roles }: { roles: Role[] }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  // Separate editing state from the name pencil-edit above — a role row
+  // can only have one inline editor open at a time in practice, but the
+  // two fields are independent enough (different action, different
+  // validation) that sharing one editingId/editValue pair would tangle
+  // "is this row mid-rename or mid-limit-edit" together for no benefit.
+  const [editingLimitId, setEditingLimitId] = useState<string | null>(null);
+  const [editLimitValue, setEditLimitValue] = useState('');
 
   function move(roleId: string, direction: 'up' | 'down') {
     setPendingId(roleId);
@@ -60,6 +69,28 @@ export function HierarchyManager({ roles }: { roles: Role[] }) {
       const result = await renameRoleAction(roleId, editValue);
       if (result.error) setError(result.error);
       else setEditingId(null);
+      setPendingId(null);
+    });
+  }
+
+  function startEditLimit(role: Role) {
+    setEditingLimitId(role.id);
+    setEditLimitValue(String(role.defaultDailyMessageLimit));
+    setError(null);
+  }
+
+  function saveEditLimit(roleId: string) {
+    const parsed = Number(editLimitValue);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      setError('Daily message limit must be a positive whole number.');
+      return;
+    }
+    setPendingId(roleId);
+    setError(null);
+    startTransition(async () => {
+      const result = await setRoleMessageLimitAction(roleId, parsed);
+      if (result.error) setError(result.error);
+      else setEditingLimitId(null);
       setPendingId(null);
     });
   }
@@ -189,6 +220,52 @@ export function HierarchyManager({ roles }: { roles: Role[] }) {
             >
               <ShieldCheck size={12} /> <span className="hidden sm:inline">Admin</span>
             </button>
+
+            {editingLimitId === role.id ? (
+              <span className="flex shrink-0 items-center gap-1">
+                <input
+                  autoFocus
+                  type="number"
+                  min={1}
+                  value={editLimitValue}
+                  onChange={(e) => setEditLimitValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveEditLimit(role.id);
+                    if (e.key === 'Escape') setEditingLimitId(null);
+                  }}
+                  disabled={pendingId === role.id}
+                  className="w-16 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-1.5 py-1 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => saveEditLimit(role.id)}
+                  disabled={pendingId === role.id}
+                  aria-label="Save daily message limit"
+                  className="rounded p-1 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950 disabled:opacity-50"
+                >
+                  <Check size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingLimitId(null)}
+                  disabled={pendingId === role.id}
+                  aria-label="Cancel"
+                  className="rounded p-1 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+                >
+                  <X size={14} />
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => startEditLimit(role)}
+                disabled={pendingId === role.id}
+                title="Default daily chat-message limit for this role"
+                className="flex shrink-0 items-center gap-1.5 rounded-full border border-zinc-200 dark:border-zinc-700 px-2 py-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 hover:border-brand-300 hover:text-brand-700 dark:hover:text-brand-300 sm:px-2.5"
+              >
+                <MessageSquare size={12} /> <span>{role.defaultDailyMessageLimit}/day</span>
+              </button>
+            )}
 
             <button
               type="button"

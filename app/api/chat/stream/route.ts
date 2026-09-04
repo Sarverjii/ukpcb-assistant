@@ -11,6 +11,7 @@ import {
 } from '@/lib/db/queries/conversations';
 import { prisma } from '@/lib/db/prisma';
 import { streamAnswer } from '@/lib/rag/chat';
+import { checkAndConsumeUsage, UsageLimitExceededError } from '@/lib/usage/limits';
 import type { ChatTurn } from '@/lib/llm/types';
 
 // Same reasoning as the other slow/model-bound routes in this app (see
@@ -18,6 +19,30 @@ import type { ChatTurn } from '@/lib/llm/types';
 // answer can still take a while to finish even though the first token now
 // arrives almost immediately.
 export const maxDuration = 60;
+
+// streamChat.ts (the client) always reads this route's response as an
+// NDJSON body stream, splitting on newlines and JSON.parse-ing each
+// complete line as a StreamEvent — it does NOT reliably fall back to
+// treating a plain JSON error body as an "error" event: confirmed
+// directly, not assumed, by watching a real 429 JSON response silently
+// leave the assistant bubble empty forever with no error shown (a real
+// browser Response from a JSON body still has a non-null `.body` stream,
+// so streamChat's `if (!res.body)` fallback branch never actually fires
+// the way it does for a route that returns no body at all). A usage-limit
+// block therefore has to speak the exact same one-line NDJSON contract
+// every other error in this route already does, not a bare JSON response.
+function errorStreamResponse(message: string): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'error', message })}\n`));
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-cache, no-transform' },
+  });
+}
 
 function autoTitle(question: string): string {
   const trimmed = question.trim().replace(/\s+/g, ' ');
@@ -68,6 +93,20 @@ export async function POST(request: Request) {
   } catch (err) {
     if (err instanceof UnauthenticatedError) {
       return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 });
+    }
+    throw err;
+  }
+
+  // Checked and CONSUMED before anything else in this request — no user
+  // message is persisted, no retrieval/embedding call is made, and no LLM
+  // is ever reached if this blocks. See lib/usage/limits.ts's module
+  // comment for the full mechanics (three levels, one atomic transaction,
+  // no leakage).
+  try {
+    await checkAndConsumeUsage({ userId: ctx.userId, departmentIds: ctx.departmentIds });
+  } catch (err) {
+    if (err instanceof UsageLimitExceededError) {
+      return errorStreamResponse(err.message);
     }
     throw err;
   }
