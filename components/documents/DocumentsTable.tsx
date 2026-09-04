@@ -13,6 +13,7 @@ import { Link2 } from 'lucide-react';
 import { LocalTime } from '@/components/admin/LocalTime';
 import { ACCEPTED_EXTENSIONS } from '@/lib/documents/uploadClient';
 import { DepartmentCheckboxList } from '@/components/shared/DepartmentCheckboxList';
+import { ClearanceLevelPicker } from '@/components/shared/ClearanceLevelPicker';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
 
 export type DocumentRow = {
@@ -167,8 +168,10 @@ function DocumentRow({
   const [departmentIds, setDepartmentIds] = useState(doc.departments.map((d) => d.id));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handleClearanceChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const level = Number(e.target.value);
+  const [clearanceLevel, setClearanceLevelState] = useState(doc.clearanceLevel);
+
+  function handleClearanceChange(level: number) {
+    setClearanceLevelState(level);
     setError(null);
     startTransition(async () => {
       const result = await changeDocumentClearanceAction(doc.id, level);
@@ -256,19 +259,8 @@ function DocumentRow({
         )}
       </td>
       <td className="px-3 py-2">{doc.uploadedByName}</td>
-      <td className="px-3 py-2">
-        <select
-          defaultValue={doc.clearanceLevel}
-          disabled={pending}
-          onChange={handleClearanceChange}
-          className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-xs disabled:opacity-50"
-        >
-          {roles.map((r) => (
-            <option key={r.hierarchyRank} value={r.hierarchyRank}>
-              {r.name}
-            </option>
-          ))}
-        </select>
+      <td className="px-3 py-2 min-w-[14rem]">
+        <ClearanceLevelPicker roles={roles} value={clearanceLevel} onChange={handleClearanceChange} disabled={pending} />
       </td>
       <td className="px-3 py-2 min-w-[26rem]">
         <DepartmentCheckboxList

@@ -18,7 +18,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   try {
     ctx = await getAuthContext();
   } catch (err) {
-    if (err instanceof UnauthenticatedError) redirect('/login');
+    // Not a plain redirect('/login') — see invalidate-session/route.ts's
+    // comment for the real redirect loop this fixes (a still-valid
+    // session cookie for a since-deleted/deactivated user, which this
+    // Server Component has no way to clear itself).
+    if (err instanceof UnauthenticatedError) redirect('/api/auth/invalidate-session');
     throw err;
   }
 

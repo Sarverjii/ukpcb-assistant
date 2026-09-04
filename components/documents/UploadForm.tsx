@@ -21,6 +21,7 @@ import {
 } from '@/lib/documents/uploadClient';
 import { useUploadQueue, type QueueItem } from '@/components/documents/UploadQueueContext';
 import { DepartmentCheckboxList } from '@/components/shared/DepartmentCheckboxList';
+import { ClearanceLevelPicker } from '@/components/shared/ClearanceLevelPicker';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
 
 type Role = { name: string; hierarchyRank: number };
@@ -295,23 +296,12 @@ function SingleUpload({
           </Field>
 
           <Field label="Clearance level" required>
-            <select
-              name="clearanceLevel"
+            <ClearanceLevelPicker
+              roles={roles}
               value={clearanceLevel}
-              onChange={(e) => setClearanceLevel(e.target.value)}
+              onChange={(rank) => setClearanceLevel(String(rank))}
               disabled={busy}
-              required
-              className={inputClass}
-            >
-              <option value="" disabled>
-                Select a clearance level…
-              </option>
-              {roles.map((r) => (
-                <option key={r.hierarchyRank} value={r.hierarchyRank}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
+            />
           </Field>
 
           <Field label="Departments">
@@ -334,7 +324,12 @@ function SingleUpload({
       <div className="flex flex-wrap items-center gap-3">
         <button
           type="submit"
-          disabled={busy || !!validationError}
+          // The ClearanceLevelPicker's pills aren't a native form control,
+          // so there's no browser "please fill in this field" validation
+          // to lean on the way the old <select required> got for free —
+          // this disabled check is now the only thing stopping a submit
+          // with no clearance level chosen.
+          disabled={busy || !!validationError || !clearanceLevel}
           className="rounded-lg bg-brand-700 dark:bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 dark:hover:bg-brand-500 disabled:opacity-60"
         >
           Upload
@@ -433,22 +428,7 @@ function BulkUploadPicker({
         filename — rename them individually afterward from the Knowledge Base table if needed.
       </p>
       <Field label="Clearance level for all files" required>
-        <select
-          name="clearanceLevel"
-          value={clearanceLevel}
-          onChange={(e) => setClearanceLevel(e.target.value)}
-          required
-          className={inputClass}
-        >
-          <option value="" disabled>
-            Select a clearance level…
-          </option>
-          {roles.map((r) => (
-            <option key={r.hierarchyRank} value={r.hierarchyRank}>
-              {r.name}
-            </option>
-          ))}
-        </select>
+        <ClearanceLevelPicker roles={roles} value={clearanceLevel} onChange={(rank) => setClearanceLevel(String(rank))} />
       </Field>
       <Field label="Departments (applies to all files in this batch)">
         <DepartmentCheckboxList departments={departments} selectedIds={departmentIds} onChange={setDepartmentIds} />
