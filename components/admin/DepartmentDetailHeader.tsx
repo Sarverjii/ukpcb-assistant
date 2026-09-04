@@ -2,21 +2,32 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Pencil, Check, X, Crown, Layers, Trash2, MessageSquare } from 'lucide-react';
+import { Pencil, Check, X, Layers, Trash2 } from 'lucide-react';
 import { updateDepartmentAction, deleteDepartmentAction } from '@/app/(app)/admin/departments/actions';
+import { TileIcon } from '@/components/shared/Avatar';
 
 type Member = { id: string; name: string };
 
 /**
- * The editable identity of a department — name, description, head, and the
- * head-department flag — all saved through the one updateDepartmentAction.
- * Inline-edit pattern (click the pencil, edit in place, save/cancel)
- * matching this app's established editing conventions (HierarchyManager's
- * rows, EmployeesTable's inline selects) rather than a separate settings
- * page. Also owns the destructive "delete this department" action, kept
- * visually and functionally separate from the edit form (a plain two-click
- * confirm, not a full re-auth dialog — see deleteDepartmentAction's own
- * comment for why that tier of gating fits this action).
+ * The editable identity of a department — name, description, head, budget,
+ * and the head-department flag — all saved through the one
+ * updateDepartmentAction. Inline-edit pattern (click the pencil, edit in
+ * place, save/cancel) matching this app's established editing conventions
+ * (HierarchyManager's rows, EmployeesTable's inline selects) rather than a
+ * separate settings page.
+ *
+ * Deliberately shows only identity (name, description, the head-department
+ * badge) in its READ-ONLY view — head, budget, and member/document counts
+ * moved to DepartmentFactsSidebar alongside this header once the page grew
+ * enough fields that stacking everything into one always-expanded card
+ * stopped reading as organized. This component still OWNS all of those
+ * fields in its edit form (one save action, one place to change anything),
+ * it just doesn't redundantly display them twice.
+ *
+ * Also owns the destructive "delete this department" action, kept visually
+ * and functionally separate from the edit form (a plain two-click confirm,
+ * not a full re-auth dialog — see deleteDepartmentAction's own comment for
+ * why that tier of gating fits this action).
  */
 export function DepartmentDetailHeader({
   departmentId,
@@ -48,8 +59,6 @@ export function DepartmentDetailHeader({
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deletePending, startDeleteTransition] = useTransition();
-
-  const currentHead = members.find((m) => m.id === headUserId);
 
   function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -103,36 +112,23 @@ export function DepartmentDetailHeader({
 
   if (!editing) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-3">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold text-zinc-900 dark:text-white">{name}</h1>
-              {isHeadDepartment && (
-                <span className="flex items-center gap-1 rounded-full bg-brand-50 dark:bg-brand-950 px-2 py-0.5 text-[11px] font-medium text-brand-700 dark:text-brand-300">
-                  <Layers size={11} /> Head department
-                </span>
-              )}
+          <div className="flex min-w-0 items-start gap-3">
+            <TileIcon label={name} />
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-lg font-semibold text-zinc-900 dark:text-white">{name}</h1>
+                {isHeadDepartment && (
+                  <span className="flex items-center gap-1 rounded-full bg-brand-50 dark:bg-brand-950 px-2 py-0.5 text-[11px] font-medium text-brand-700 dark:text-brand-300">
+                    <Layers size={11} /> Head department
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                {description || <span className="italic text-zinc-400 dark:text-zinc-600">No description yet</span>}
+              </p>
             </div>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              {description || <span className="italic text-zinc-400 dark:text-zinc-600">No description yet</span>}
-            </p>
-            {isHeadDepartment && (
-              <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
-                Sees every document tagged with any department, on top of clearance and its own members.
-              </p>
-            )}
-            {currentHead && (
-              <p className="mt-2 flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-300">
-                <Crown size={14} className="text-amber-500" /> Headed by {currentHead.name}
-              </p>
-            )}
-            <p className="mt-2 flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-300">
-              <MessageSquare size={14} className="text-zinc-400" />
-              {dailyMessageLimit !== null
-                ? `${dailyMessageLimit} messages/day department budget`
-                : 'No department-wide message budget — each member uses their own limit'}
-            </p>
           </div>
           <button
             type="button"
@@ -143,25 +139,22 @@ export function DepartmentDetailHeader({
           </button>
         </div>
 
-        <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50/50 dark:bg-red-950/30 p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-red-700/80 dark:text-red-400/80">
-              Deleting removes this department from every document and employee currently tagged with
-              it — nothing else about them is touched, and re-tagging afterward is always possible.
-            </p>
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deletePending}
-              className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium disabled:opacity-60 ${
-                confirmingDelete
-                  ? 'bg-red-600 text-white hover:bg-red-700'
-                  : 'border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950'
-              }`}
-            >
-              <Trash2 size={13} /> {confirmingDelete ? 'Confirm delete?' : 'Delete department'}
-            </button>
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-200 dark:border-red-900 bg-red-50/50 dark:bg-red-950/30 px-3 py-2">
+          <p className="text-xs text-red-700/80 dark:text-red-400/80">
+            Deleting removes this department from every document and employee tagged with it.
+          </p>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={deletePending}
+            className={`flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium disabled:opacity-60 ${
+              confirmingDelete
+                ? 'bg-red-600 text-white hover:bg-red-700'
+                : 'border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950'
+            }`}
+          >
+            <Trash2 size={13} /> {confirmingDelete ? 'Confirm delete?' : 'Delete department'}
+          </button>
         </div>
         {error && <p className="text-sm text-red-600">{error}</p>}
       </div>

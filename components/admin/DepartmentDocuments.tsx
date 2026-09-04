@@ -15,7 +15,6 @@ export function DepartmentDocuments({ documents, roles }: { documents: Doc[]; ro
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Documents in this department</h2>
       <p className="text-xs text-zinc-500 dark:text-zinc-400">
         Every member sees these regardless of their own clearance. Manage tagging from the Knowledge
         Base.

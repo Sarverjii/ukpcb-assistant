@@ -4,6 +4,8 @@ import { getDepartmentWithMembers } from '@/lib/db/queries/departments';
 import { listUsersWithRole, listRolesByRank } from '@/lib/db/queries/users';
 import { listDocumentsForDepartment } from '@/lib/db/queries/documents';
 import { DepartmentDetailHeader } from '@/components/admin/DepartmentDetailHeader';
+import { DepartmentFactsSidebar } from '@/components/admin/DepartmentFactsSidebar';
+import { DepartmentTabs } from '@/components/admin/DepartmentTabs';
 import { DepartmentMembers } from '@/components/admin/DepartmentMembers';
 import { DepartmentDocuments } from '@/components/admin/DepartmentDocuments';
 
@@ -21,6 +23,7 @@ export default async function DepartmentDetailPage({
 
   const memberIds = new Set(dept.users.map((u) => u.id));
   const nonMembers = allUsers.filter((u) => !memberIds.has(u.id));
+  const head = dept.users.find((u) => u.id === dept.headUserId);
 
   return (
     <div className="flex flex-col gap-6">
@@ -38,16 +41,32 @@ export default async function DepartmentDetailPage({
         members={dept.users.map((u) => ({ id: u.id, name: u.name }))}
       />
 
-      <DepartmentDocuments
-        documents={documents}
-        roles={roles.map((r) => ({ hierarchyRank: r.hierarchyRank, name: r.name }))}
-      />
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <DepartmentFactsSidebar
+          headName={head?.name ?? null}
+          dailyMessageLimit={dept.dailyMessageLimit}
+          memberCount={dept.users.length}
+          documentCount={documents.length}
+        />
 
-      <DepartmentMembers
-        departmentId={dept.id}
-        members={dept.users.map((u) => ({ id: u.id, name: u.name, email: u.email, roleName: u.role.name }))}
-        nonMembers={nonMembers.map((u) => ({ id: u.id, name: u.name, email: u.email, roleName: u.role.name }))}
-      />
+        <DepartmentTabs
+          memberCount={dept.users.length}
+          documentCount={documents.length}
+          members={
+            <DepartmentMembers
+              departmentId={dept.id}
+              members={dept.users.map((u) => ({ id: u.id, name: u.name, email: u.email, roleName: u.role.name }))}
+              nonMembers={nonMembers.map((u) => ({ id: u.id, name: u.name, email: u.email, roleName: u.role.name }))}
+            />
+          }
+          documents={
+            <DepartmentDocuments
+              documents={documents}
+              roles={roles.map((r) => ({ hierarchyRank: r.hierarchyRank, name: r.name }))}
+            />
+          }
+        />
+      </div>
     </div>
   );
 }

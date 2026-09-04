@@ -24,6 +24,7 @@ export default async function DepartmentsPage() {
           description: d.description,
           head: d.head,
           isHeadDepartment: d.isHeadDepartment,
+          dailyMessageLimit: d.dailyMessageLimit,
           memberCount: d._count.users,
           documentCount: d._count.documents,
         }))}

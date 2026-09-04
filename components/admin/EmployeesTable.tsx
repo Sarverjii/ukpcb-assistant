@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   changeEmployeeRoleAction,
   changeEmployeeDepartmentsAction,
@@ -14,6 +14,8 @@ import { LocalTime } from '@/components/admin/LocalTime';
 import { ReauthDialog } from '@/components/admin/ReauthDialog';
 import { EmailPreviewModal } from '@/components/admin/EmailPreviewModal';
 import { DepartmentPicker, type PickableDepartment } from '@/components/shared/DepartmentPicker';
+import { Avatar } from '@/components/shared/Avatar';
+import { RowActionsMenu } from '@/components/shared/RowActionsMenu';
 import type { ComposedEmail } from '@/lib/employees/emailCompose';
 
 // listUsersWithRole (the sole source of this table's rows) excludes REMOVED
@@ -64,9 +66,28 @@ export function EmployeesTable({
     if (q && !u.name.toLowerCase().includes(q) && !u.email.toLowerCase().includes(q)) return false;
     return true;
   });
+  const activeCount = users.filter((u) => u.status === 'ACTIVE').length;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-4 text-sm text-zinc-500 dark:text-zinc-400">
+        <span>
+          <span className="font-semibold text-zinc-900 dark:text-white">{users.length}</span> employee
+          {users.length === 1 ? '' : 's'}
+        </span>
+        <span className="h-3 w-px bg-zinc-200 dark:bg-zinc-800" aria-hidden />
+        <span className="flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          {activeCount} active
+        </span>
+        {users.length - activeCount > 0 && (
+          <span className="flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+            {users.length - activeCount} disabled
+          </span>
+        )}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <input
           type="text"
@@ -96,23 +117,22 @@ export function EmployeesTable({
           <option value="ACTIVE">Active</option>
           <option value="DISABLED">Disabled</option>
         </select>
-        <span className="text-xs text-zinc-400">
+        <span className="ml-auto text-xs text-zinc-400">
           {filtered.length} of {users.length}
         </span>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
+      <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
         <table className="w-full text-left text-sm">
-          <thead className="bg-zinc-50 dark:bg-zinc-900 text-xs uppercase text-zinc-500">
+          <thead className="border-b border-zinc-200 dark:border-zinc-800 text-xs uppercase tracking-wide text-zinc-500">
             <tr>
-              <th className="px-3 py-2">Name</th>
-              <th className="px-3 py-2">Email</th>
-              <th className="px-3 py-2">Department</th>
-              <th className="px-3 py-2">Role / Clearance</th>
-              <th className="px-3 py-2">Msg limit/day</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Last login</th>
-              <th className="px-3 py-2">Actions</th>
+              <th className="px-4 py-3 font-medium">Employee</th>
+              <th className="px-4 py-3 font-medium">Department</th>
+              <th className="px-4 py-3 font-medium">Role / Clearance</th>
+              <th className="px-4 py-3 font-medium">Msg limit/day</th>
+              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Last login</th>
+              <th className="px-4 py-3 font-medium text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -127,7 +147,7 @@ export function EmployeesTable({
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-4 text-center text-zinc-400">
+                <td colSpan={7} className="px-4 py-6 text-center text-zinc-400">
                   No employees match your search.
                 </td>
               </tr>
@@ -138,8 +158,6 @@ export function EmployeesTable({
     </div>
   );
 }
-
-type ReauthAction = 'toggleStatus' | 'resetPassword' | 'remove';
 
 function EmployeeRow({
   user,
@@ -152,6 +170,7 @@ function EmployeeRow({
   departments: PickableDepartment[];
   isSelf: boolean;
 }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [reauthAction, setReauthAction] = useState<ReauthAction | null>(null);
@@ -210,10 +229,17 @@ function EmployeeRow({
   }
 
   return (
-    <tr className="border-t border-zinc-100 dark:border-zinc-800 align-top">
-      <td className="px-3 py-2">{user.name}</td>
-      <td className="px-3 py-2">{user.email}</td>
-      <td className="px-3 py-2 min-w-[10rem]">
+    <tr className="border-t border-zinc-100 dark:border-zinc-800 align-top hover:bg-zinc-50/60 dark:hover:bg-zinc-900/40">
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <Avatar name={user.name} />
+          <div className="min-w-0">
+            <p className="truncate font-medium text-zinc-900 dark:text-white">{user.name}</p>
+            <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">{user.email}</p>
+          </div>
+        </div>
+      </td>
+      <td className="px-4 py-3 w-40">
         <DepartmentPicker
           departments={departments}
           selectedIds={departmentIds}
@@ -222,7 +248,7 @@ function EmployeeRow({
           placeholder="—"
         />
       </td>
-      <td className="px-3 py-2">
+      <td className="px-4 py-3">
         <select
           defaultValue={user.roleId}
           disabled={isSelf || pending}
@@ -236,7 +262,7 @@ function EmployeeRow({
           ))}
         </select>
       </td>
-      <td className="px-3 py-2">
+      <td className="px-4 py-3">
         <input
           type="number"
           min={1}
@@ -247,59 +273,46 @@ function EmployeeRow({
             if (e.key === 'Enter') e.currentTarget.blur();
           }}
           disabled={pending}
-          placeholder={roleDefault !== null ? `${roleDefault} (role default)` : '—'}
+          placeholder={roleDefault !== null ? `${roleDefault} (default)` : '—'}
           title="Leave blank to use the role's default daily message limit"
-          className="w-32 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-xs disabled:opacity-50"
+          className="w-28 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-xs disabled:opacity-50"
         />
       </td>
-      <td className="px-3 py-2">
+      <td className="px-4 py-3">
         <span
           className={
             user.status === 'ACTIVE'
-              ? 'rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700'
-              : 'rounded-full bg-zinc-200 px-2 py-0.5 text-xs font-medium text-zinc-600'
+              ? 'inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-950 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-300'
+              : 'inline-flex items-center gap-1 rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:text-zinc-400'
           }
         >
-          {user.status}
+          {user.status === 'ACTIVE' ? 'Active' : 'Disabled'}
         </span>
       </td>
-      <td className="px-3 py-2 whitespace-nowrap text-zinc-500">
+      <td className="px-4 py-3 whitespace-nowrap text-zinc-500">
         {user.lastLoginAt ? <LocalTime iso={user.lastLoginAt} /> : 'Never'}
       </td>
-      <td className="px-3 py-2">
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href={`/admin/employees/${user.id}`}
-            className="rounded-md border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800"
-          >
-            View conversations
-          </Link>
-          <button
-            type="button"
-            disabled={isSelf || pending}
-            onClick={() => setReauthAction('toggleStatus')}
-            className="rounded-md border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
-          >
-            {user.status === 'ACTIVE' ? 'Disable' : 'Enable'}
-          </button>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => setReauthAction('resetPassword')}
-            className="rounded-md border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
-          >
-            Reset password
-          </button>
-          <button
-            type="button"
-            disabled={isSelf || pending}
-            onClick={() => setReauthAction('remove')}
-            className="rounded-md border border-red-300 dark:border-red-800 px-2 py-1 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50"
-          >
-            Remove
-          </button>
+      <td className="px-4 py-3 text-right">
+        <div className="flex items-center justify-end gap-1.5">
+          {error && <span className="text-xs text-red-600">{error}</span>}
+          <RowActionsMenu
+            actions={[
+              { label: 'View conversations', onClick: () => router.push(`/admin/employees/${user.id}`) },
+              {
+                label: user.status === 'ACTIVE' ? 'Disable' : 'Enable',
+                onClick: () => setReauthAction('toggleStatus'),
+                disabled: isSelf || pending,
+              },
+              { label: 'Reset password', onClick: () => setReauthAction('resetPassword'), disabled: pending },
+              {
+                label: 'Remove',
+                onClick: () => setReauthAction('remove'),
+                disabled: isSelf || pending,
+                danger: true,
+              },
+            ]}
+          />
         </div>
-        {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
       </td>
 
       {reauthAction === 'toggleStatus' && (
@@ -339,3 +352,5 @@ function EmployeeRow({
     </tr>
   );
 }
+
+type ReauthAction = 'toggleStatus' | 'resetPassword' | 'remove';

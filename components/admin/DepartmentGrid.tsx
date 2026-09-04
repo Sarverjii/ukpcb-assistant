@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
-import { Plus, Users, FileText, Crown, Layers, UserX } from 'lucide-react';
+import { Plus, Users, FileText, Crown, Layers, UserX, MessageSquare } from 'lucide-react';
 import { createDepartmentAction } from '@/app/(app)/admin/departments/actions';
+import { TileIcon } from '@/components/shared/Avatar';
 
 type Department = {
   id: string;
@@ -11,6 +12,7 @@ type Department = {
   description: string | null;
   head: { id: string; name: string; email: string } | null;
   isHeadDepartment: boolean;
+  dailyMessageLimit: number | null;
   memberCount: number;
   documentCount: number;
 };
@@ -44,36 +46,46 @@ export function DepartmentGrid({
           <Link
             key={dept.id}
             href={`/admin/departments/${dept.id}`}
-            className="flex flex-col gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 hover:shadow-sm transition-colors"
+            className="group flex flex-col gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 hover:border-brand-400 dark:hover:border-brand-500 hover:shadow-sm transition-colors"
           >
-            <div>
-              <div className="flex items-center gap-1.5">
-                <p className="text-sm font-semibold text-zinc-900 dark:text-white">{dept.name}</p>
-                {dept.isHeadDepartment && (
-                  <Layers size={12} className="shrink-0 text-brand-600" aria-label="Head department" />
+            <div className="flex items-start gap-3">
+              <TileIcon label={dept.name} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{dept.name}</p>
+                  {dept.isHeadDepartment && (
+                    <Layers size={12} className="shrink-0 text-brand-600" aria-label="Head department" />
+                  )}
+                </div>
+                {dept.head ? (
+                  <div className="mt-0.5 flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                    <Crown size={11} className="shrink-0 text-amber-500" />
+                    <span className="truncate">{dept.head.name}</span>
+                  </div>
+                ) : (
+                  <p className="mt-0.5 text-xs text-zinc-400 dark:text-zinc-600">No head set</p>
                 )}
               </div>
-              {dept.description ? (
-                <p className="mt-1 line-clamp-2 text-xs text-zinc-500 dark:text-zinc-400">{dept.description}</p>
-              ) : (
-                <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-600 italic">No description yet</p>
-              )}
             </div>
 
-            {dept.head && (
-              <div className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-300">
-                <Crown size={12} className="shrink-0 text-amber-500" />
-                <span className="truncate">{dept.head.name}</span>
-              </div>
+            {dept.description ? (
+              <p className="line-clamp-2 text-xs text-zinc-500 dark:text-zinc-400">{dept.description}</p>
+            ) : (
+              <p className="text-xs italic text-zinc-400 dark:text-zinc-600">No description yet</p>
             )}
 
-            <div className="mt-auto flex items-center gap-4 border-t border-zinc-100 dark:border-zinc-800 pt-3 text-xs text-zinc-500 dark:text-zinc-400">
+            <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-zinc-100 dark:border-zinc-800 pt-3 text-xs text-zinc-500 dark:text-zinc-400">
               <span className="flex items-center gap-1.5">
                 <Users size={13} /> {dept.memberCount} member{dept.memberCount === 1 ? '' : 's'}
               </span>
               <span className="flex items-center gap-1.5">
                 <FileText size={13} /> {dept.documentCount} document{dept.documentCount === 1 ? '' : 's'}
               </span>
+              {dept.dailyMessageLimit !== null && (
+                <span className="flex items-center gap-1.5">
+                  <MessageSquare size={13} /> {dept.dailyMessageLimit}/day budget
+                </span>
+              )}
             </div>
           </Link>
         ))}

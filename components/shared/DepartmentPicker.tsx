@@ -98,11 +98,20 @@ export function DepartmentPicker({
   }
 
   const selectedNames = departments.filter((d) => selectedIds.includes(d.id)).map((d) => d.name);
+  // Was "join every name up to 2, then switch to a count" — two long
+  // department names (e.g. "Sales & Business Development") joined
+  // together routinely overflowed a table cell's width with nothing to
+  // stop it wrapping onto several lines, ballooning that one row's height
+  // far past its neighbors (a real reported bug, not a hypothetical). A
+  // single selection still shows its real name (the common case, worth
+  // being concrete about); two or more always collapses to a count —
+  // `truncate` below is what actually guarantees one line regardless, this
+  // just keeps the usual case from needing it.
   const label =
     selectedNames.length === 0
       ? placeholder
-      : selectedNames.length <= 2
-        ? selectedNames.join(', ')
+      : selectedNames.length === 1
+        ? selectedNames[0]
         : `${selectedNames.length} departments`;
 
   function toggle(id: string) {
@@ -119,7 +128,7 @@ export function DepartmentPicker({
         aria-expanded={open}
         className="flex w-full items-center justify-between gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-60"
       >
-        <span className={selectedNames.length === 0 ? 'text-zinc-400' : 'text-zinc-900 dark:text-white'}>
+        <span className={`truncate ${selectedNames.length === 0 ? 'text-zinc-400' : 'text-zinc-900 dark:text-white'}`}>
           {label}
         </span>
         <ChevronDown size={14} className={`shrink-0 text-zinc-400 transition-transform ${open ? 'rotate-180' : ''}`} />

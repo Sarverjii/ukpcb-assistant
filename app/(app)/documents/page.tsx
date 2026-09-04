@@ -44,6 +44,7 @@ export default async function DocumentLibraryPage() {
             tags: d.tags,
             clearanceLevel: d.clearanceLevel,
             updatedAt: d.updatedAt.toISOString(),
+            sourceUrl: d.sourceUrl,
           }))}
           roles={roles.map((r) => ({ hierarchyRank: r.hierarchyRank, name: r.name }))}
           departments={departments.map((d) => ({ id: d.id, name: d.name }))}

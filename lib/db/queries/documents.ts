@@ -151,6 +151,12 @@ export function listAccessibleDocumentSummariesForBrowsing(
       clearanceLevel: true,
       createdAt: true,
       updatedAt: true,
+      // Set only for a document added by pasting a URL — see
+      // Document.sourceUrl's own comment. Lets the document library split
+      // uploaded files from website pages into their own tab, and link a
+      // website page straight to its real live URL instead of the
+      // internally generated PDF rendition every uploaded file uses.
+      sourceUrl: true,
     },
     orderBy: { name: 'asc' },
   });
