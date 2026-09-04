@@ -13,7 +13,7 @@ export default async function DirectoryPage() {
   const [entries, departments] = await Promise.all([listDirectoryEntries(), listDepartmentsWithStats()]);
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
+    <main className="mx-auto max-w-[100rem] px-4 py-10 sm:px-6">
       <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">Evon Directory</h1>
       <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
         Find anyone at Evon by name, email, or department — {entries.length} people.

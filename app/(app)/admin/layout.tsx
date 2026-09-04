@@ -24,7 +24,17 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
+    // Was max-w-6xl (1152px) — real reported issue: every admin table
+    // (Employees especially, with 7 columns including a name+email
+    // identity cell, a department picker, and a role select) needed more
+    // room than that left after the page's own side padding, forcing an
+    // internal horizontal scroll that hid the Actions column by default
+    // on an ordinary laptop-width window, while leaving visibly empty
+    // gutters on anything wider. max-w-[100rem] (1600px) is generous
+    // enough that these tables lay out comfortably without scrolling on
+    // a normal wide monitor, while still capping line length on an
+    // ultrawide display rather than going edge-to-edge unbounded.
+    <div className="mx-auto max-w-[100rem] px-4 py-8 sm:px-6">
       <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">Admin dashboard</h1>
       <AdminNav />
       <div className="mt-6">{children}</div>

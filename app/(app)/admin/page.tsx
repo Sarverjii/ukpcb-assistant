@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getDashboardOverview } from '@/lib/db/queries/admin';
 import { listRecentUnansweredQuestions } from '@/lib/db/queries/auditLogs';
 import { prisma } from '@/lib/db/prisma';
+import { LocalTime } from '@/components/admin/LocalTime';
 
 export default async function AdminOverviewPage() {
   const [overview, roles, unanswered] = await Promise.all([
@@ -60,7 +61,9 @@ export default async function AdminOverviewPage() {
             <tbody>
               {unanswered.map((entry) => (
                 <tr key={entry.id} className="border-t border-zinc-100 dark:border-zinc-800">
-                  <td className="px-3 py-2 whitespace-nowrap text-zinc-500">{entry.createdAt.toLocaleString()}</td>
+                  <td className="px-3 py-2 whitespace-nowrap text-zinc-500">
+                    <LocalTime iso={entry.createdAt.toISOString()} />
+                  </td>
                   <td className="px-3 py-2">{entry.userName ?? '—'}</td>
                   <td className="px-3 py-2">{entry.question ?? '—'}</td>
                 </tr>
@@ -92,7 +95,9 @@ export default async function AdminOverviewPage() {
             <tbody>
               {overview.recentActivity.map((entry) => (
                 <tr key={entry.id} className="border-t border-zinc-100 dark:border-zinc-800">
-                  <td className="px-3 py-2 text-zinc-500">{entry.createdAt.toLocaleString()}</td>
+                  <td className="px-3 py-2 text-zinc-500">
+                    <LocalTime iso={entry.createdAt.toISOString()} />
+                  </td>
                   <td className="px-3 py-2">{entry.user?.name ?? '—'}</td>
                   <td className="px-3 py-2 font-mono text-xs">{entry.action}</td>
                   <td className="px-3 py-2">

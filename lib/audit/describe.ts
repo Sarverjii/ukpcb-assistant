@@ -242,9 +242,15 @@ export function describeAuditEvent(
       const limit = num(m.limit);
       const used = num(m.used);
       const deptName = str(m.departmentName);
-      const scopeLabel = scope === 'ORG' ? 'company-wide' : scope === 'DEPARTMENT' ? (deptName ?? 'department') : 'their own';
+      // Each scope reads as a genuinely different sentence shape, not one
+      // template with a swapped-in noun — "hit the their own daily
+      // message limit" (the previous version, plugging "their own" into
+      // "hit the X daily message limit") was a real grammar bug, found by
+      // actually reading the rendered audit log, not just the code.
+      const subject =
+        scope === 'ORG' ? "the company-wide" : scope === 'DEPARTMENT' ? `${deptName ?? 'a department'}'s` : 'their own';
       return limit !== null
-        ? `Blocked: hit the ${scopeLabel} daily message limit (${used ?? '?'}/${limit})`
+        ? `Blocked: hit ${subject} daily message limit (${used ?? '?'}/${limit})`
         : 'Blocked: hit a daily message limit';
     }
     case 'USAGE_LIMIT_CONFIG_CHANGED': {

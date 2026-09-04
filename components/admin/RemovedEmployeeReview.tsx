@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { deleteDocumentAction } from '@/app/(app)/knowledge-base/actions';
 import { deleteEmployeePermanentlyAction } from '@/app/(app)/admin/employees/actions';
 import { ReauthDialog } from '@/components/admin/ReauthDialog';
+import { LocalTime } from '@/components/admin/LocalTime';
 
 type Document = {
   id: string;
@@ -83,7 +84,7 @@ export function RemovedEmployeeReview({
                   <td className="px-3 py-2">{d.clearanceLevel}</td>
                   <td className="px-3 py-2">{d.status}</td>
                   <td className="px-3 py-2 whitespace-nowrap text-zinc-500">
-                    {new Date(d.updatedAt).toLocaleDateString()}
+                    <LocalTime iso={d.updatedAt} />
                   </td>
                   <td className="px-3 py-2">
                     <button

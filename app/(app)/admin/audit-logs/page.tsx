@@ -3,6 +3,7 @@ import { listAuditLogs, listDistinctAuditActions, type AuditLogEntry } from '@/l
 import { listRolesByRank } from '@/lib/db/queries/users';
 import { describeAuditEvent } from '@/lib/audit/describe';
 import { AuditLogFilters } from '@/components/admin/AuditLogFilters';
+import { LocalTime } from '@/components/admin/LocalTime';
 
 export default async function AuditLogPage({
   searchParams,
@@ -113,7 +114,7 @@ function AuditLogRow({
             ) : (
               'System · '
             )}
-            {entry.createdAt.toLocaleString()}
+            <LocalTime iso={entry.createdAt.toISOString()} />
           </p>
         </div>
         <span

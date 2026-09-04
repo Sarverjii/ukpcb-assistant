@@ -95,7 +95,7 @@ export function EvonDirectory({
             {matches.length} match{matches.length === 1 ? '' : 'es'}
           </p>
           {matches.length > 0 ? (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {matches.map((p) => (
                 <PersonCard key={p.id} person={p} isViewer={p.id === viewerId} />
               ))}
@@ -127,7 +127,7 @@ export function EvonDirectory({
                       {group.people.length} {group.people.length === 1 ? 'person' : 'people'}
                     </span>
                   </summary>
-                  <div className="grid grid-cols-1 gap-2 px-4 pt-1 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-2 px-4 pt-1 sm:grid-cols-2 lg:grid-cols-3">
                     {group.people.map((p) => (
                       <PersonCard key={p.id} person={p} isViewer={p.id === viewerId} compact />
                     ))}
