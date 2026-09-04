@@ -62,3 +62,14 @@ next-env.d.ts
 # one-off local scripts (data migration/seeding helpers, debugging), never
 # part of the app itself
 /scratch-*
+
+# Large Database/ — the standalone bulk-upload script's own working
+# folder (see Large Database/README.md). Keep the script and docs in git,
+# but never the real source documents it uploads, its dependency install,
+# its local dedup ledger, its lock file, or its dated run logs — all of
+# that is this machine's own operational state, not project source.
+/Large Database/Documents/
+/Large Database/node_modules/
+/Large Database/upload-state.json
+/Large Database/.upload.lock
+/Large Database/logs/
