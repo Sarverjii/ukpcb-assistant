@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowUp, Copy, Check, RotateCw, Download, ChevronDown, FileText, FileDown, ThumbsUp, ThumbsDown, Pencil, Paperclip, X, ExternalLink } from 'lucide-react';
+import { ArrowUp, Copy, Check, RotateCw, Download, ChevronDown, FileText, FileDown, ThumbsUp, ThumbsDown, Pencil, Paperclip, X, ExternalLink, Search } from 'lucide-react';
 import { streamChat } from '@/components/chat/streamChat';
 import { Markdown } from '@/components/chat/Markdown';
 import { useCitationPreview, type Citation } from '@/components/chat/CitationPreviewContext';
@@ -52,11 +52,22 @@ export function ChatPanel({
   // comment on why regenerate can't carry it).
   const [scopedDocumentIds, setScopedDocumentIds] = useState<string[]>([]);
   const [showDocPicker, setShowDocPicker] = useState(false);
+  // Cleared whenever the picker closes (see the outside-click/Escape
+  // effect below) so reopening it always starts from the full list rather
+  // than whatever was typed last time — this corpus runs to the hundreds
+  // of documents, where scrolling a flat unfiltered list to find one by
+  // name stopped being practical.
+  const [docSearch, setDocSearch] = useState('');
   const { openCitation } = useCitationPreview();
   const router = useRouter();
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const docPickerRef = useRef<HTMLDivElement>(null);
+  // Starts at 0 (not messages.length) specifically so the very first
+  // effect run after mount still sees "length increased" and lands the
+  // view at the bottom of an existing conversation, same as before this
+  // ref-based guard existed.
+  const prevMessagesLengthRef = useRef(0);
   // A plain incrementing counter, not Date.now()/crypto.randomUUID() — this
   // function (handleEditMessage) also reads `messages` directly rather than
   // only through a setState updater's `prev`, and the two combined trips
@@ -70,9 +81,28 @@ export function ChatPanel({
     return `${prefix}-${localIdCounter.current}`;
   }
 
+  // Was unconditional on every `messages` change — which also fires for an
+  // in-place content update to an EXISTING message (regenerate/edit both
+  // work by mutating one message's content, not appending), so
+  // regenerating an older reply yanked the view down to the bottom on the
+  // very first delta, then kept doing it on every subsequent delta as the
+  // new answer streamed in. Auto-scrolling now only follows two cases
+  // that actually warrant it: a brand-new message was appended (length
+  // increased — a real send, or a fresh follow-up), or the message
+  // currently streaming IS the last one in the list (regenerating/editing
+  // the most recent reply, where staying pinned to the bottom is still the
+  // expected "watch it type" behavior). Regenerating anything earlier in
+  // the conversation now leaves the scroll position exactly where the
+  // reader put it.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    const lengthIncreased = messages.length > prevMessagesLengthRef.current;
+    prevMessagesLengthRef.current = messages.length;
+    const lastMessage = messages[messages.length - 1];
+    const streamingIsLastMessage = streamingId !== null && lastMessage?.id === streamingId;
+    if (lengthIncreased || streamingIsLastMessage) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, streamingId]);
 
   // Focuses the composer on first load and every remount (a fresh page
   // load, or navigating to a different conversation — ChatPanel is
@@ -88,13 +118,22 @@ export function ChatPanel({
   // list — easy to never reach). Closing on an outside click or Escape,
   // same as ExportMenu's dropdown below, fixes that regardless of list
   // length or scroll position.
+  // Closes the picker AND clears whatever was searched — every close path
+  // (outside click, Escape, the explicit X button) goes through this one
+  // function so reopening always starts from the full list rather than
+  // wherever the last search left off.
+  function closeDocPicker() {
+    setShowDocPicker(false);
+    setDocSearch('');
+  }
+
   useEffect(() => {
     if (!showDocPicker) return;
     function handleClick(e: MouseEvent) {
-      if (docPickerRef.current && !docPickerRef.current.contains(e.target as Node)) setShowDocPicker(false);
+      if (docPickerRef.current && !docPickerRef.current.contains(e.target as Node)) closeDocPicker();
     }
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setShowDocPicker(false);
+      if (e.key === 'Escape') closeDocPicker();
     }
     document.addEventListener('mousedown', handleClick);
     document.addEventListener('keydown', handleKey);
@@ -314,13 +353,21 @@ export function ChatPanel({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }
 
+  // The corpus this filters over runs to the hundreds of documents — cheap
+  // enough to recompute on every render (a plain client-side name filter,
+  // same reasoning DocumentsTable/EmployeesTable already use for their own
+  // search boxes) without memoizing.
+  const filteredDocuments = availableDocuments.filter((doc) =>
+    doc.name.toLowerCase().includes(docSearch.trim().toLowerCase()),
+  );
+
   const inputBar = (
     <>
       {availableDocuments.length > 0 && (
         <div ref={docPickerRef} className="mx-auto mb-2 flex w-full max-w-3xl flex-wrap items-center gap-1.5">
           <button
             type="button"
-            onClick={() => setShowDocPicker((o) => !o)}
+            onClick={() => (showDocPicker ? closeDocPicker() : setShowDocPicker(true))}
             className="flex items-center gap-1 rounded-full border border-dashed border-zinc-300 dark:border-zinc-700 px-2.5 py-1 text-xs text-zinc-500 dark:text-zinc-400 hover:border-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
           >
             <Paperclip size={11} />
@@ -352,15 +399,26 @@ export function ChatPanel({
                   <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Scope to document(s)</span>
                   <button
                     type="button"
-                    onClick={() => setShowDocPicker(false)}
+                    onClick={closeDocPicker}
                     aria-label="Close"
                     className="rounded p-0.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 dark:hover:text-zinc-200"
                   >
                     <X size={13} />
                   </button>
                 </div>
+                <div className="flex items-center gap-1.5 border-b border-zinc-100 dark:border-zinc-800 px-3 py-1.5">
+                  <Search size={13} className="shrink-0 text-zinc-400" />
+                  <input
+                    type="text"
+                    autoFocus
+                    value={docSearch}
+                    onChange={(e) => setDocSearch(e.target.value)}
+                    placeholder="Search documents…"
+                    className="w-full bg-transparent text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400"
+                  />
+                </div>
                 <div className="max-h-56 overflow-y-auto py-1">
-                  {availableDocuments.map((doc) => (
+                  {filteredDocuments.map((doc) => (
                     <button
                       key={doc.id}
                       type="button"
@@ -377,6 +435,9 @@ export function ChatPanel({
                       {scopedDocumentIds.includes(doc.id) && <Check size={13} />}
                     </button>
                   ))}
+                  {filteredDocuments.length === 0 && (
+                    <p className="px-3 py-2 text-sm text-zinc-400">No documents match &ldquo;{docSearch}&rdquo;.</p>
+                  )}
                 </div>
               </div>
             </div>
