@@ -9,7 +9,7 @@ import {
   replaceDocumentAction,
   finalizeReplaceDocumentAction,
 } from '@/app/(app)/knowledge-base/actions';
-import { Link2 } from 'lucide-react';
+import { Link2, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { LocalTime } from '@/components/admin/LocalTime';
 import { ACCEPTED_EXTENSIONS } from '@/lib/documents/uploadClient';
 import { DepartmentCheckboxList } from '@/components/shared/DepartmentCheckboxList';
@@ -35,6 +35,82 @@ export type DocumentRow = {
 };
 type Role = { hierarchyRank: number; name: string };
 
+type SortKey = 'name' | 'uploadedByName' | 'clearanceLevel' | 'department' | 'status' | 'updatedAt';
+type SortDir = 'asc' | 'desc';
+
+// Comparable string for the Department column — there's no single scalar
+// to sort a multi-department document by, so this uses every assigned
+// department's name joined in the same left-to-right order the pills
+// themselves render in, which sorts documents sharing a first department
+// together the same way visually scanning the column already groups them.
+function departmentSortValue(doc: DocumentRow): string {
+  return doc.departments.map((d) => d.name).join(', ').toLowerCase();
+}
+
+function compareDocuments(a: DocumentRow, b: DocumentRow, key: SortKey): number {
+  switch (key) {
+    case 'name':
+      return a.name.localeCompare(b.name);
+    case 'uploadedByName':
+      return a.uploadedByName.localeCompare(b.uploadedByName);
+    case 'clearanceLevel':
+      return a.clearanceLevel - b.clearanceLevel;
+    case 'department':
+      return departmentSortValue(a).localeCompare(departmentSortValue(b));
+    case 'status':
+      return a.status.localeCompare(b.status);
+    case 'updatedAt':
+      return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+  }
+}
+
+/**
+ * One clickable column header — click cycles ascending → descending
+ * (clicking a different column starts it fresh at ascending). Modeled
+ * as a plain button rather than making the whole <th> clickable so the
+ * larger hit target and focus outline both land where the click actually
+ * does something.
+ */
+function SortableTh({
+  label,
+  sortKey,
+  activeKey,
+  dir,
+  onSort,
+  className,
+}: {
+  label: string;
+  sortKey: SortKey;
+  activeKey: SortKey;
+  dir: SortDir;
+  onSort: (key: SortKey) => void;
+  className?: string;
+}) {
+  const isActive = sortKey === activeKey;
+  return (
+    <th className={`px-3 py-2 ${className ?? ''}`}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`flex items-center gap-1 uppercase tracking-wide hover:text-zinc-700 dark:hover:text-zinc-300 ${
+          isActive ? 'text-zinc-700 dark:text-zinc-200' : ''
+        }`}
+      >
+        {label}
+        {isActive ? (
+          dir === 'asc' ? (
+            <ChevronUp size={12} className="shrink-0" />
+          ) : (
+            <ChevronDown size={12} className="shrink-0" />
+          )
+        ) : (
+          <ChevronsUpDown size={12} className="shrink-0 opacity-40" />
+        )}
+      </button>
+    </th>
+  );
+}
+
 export function DocumentsTable({
   documents,
   roles,
@@ -50,6 +126,21 @@ export function DocumentsTable({
   const [clearanceFilter, setClearanceFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
+  // Defaults to most-recently-updated first — the same order the table
+  // effectively had before sorting existed (documents arrive newest-first
+  // from the server), so adding this doesn't change what a first-time
+  // visit to this page looks like.
+  const [sortKey, setSortKey] = useState<SortKey>('updatedAt');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  function handleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  }
 
   // Filtered client-side for the same reason as EmployeesTable: the corpus
   // (dozens to low hundreds of documents) is already fetched for this page,
@@ -62,6 +153,10 @@ export function DocumentsTable({
     if (departmentFilter !== 'ALL' && !d.departments.some((dept) => dept.id === departmentFilter)) return false;
     if (q && !d.name.toLowerCase().includes(q)) return false;
     return true;
+  });
+  const sorted = [...filtered].sort((a, b) => {
+    const cmp = compareDocuments(a, b, sortKey);
+    return sortDir === 'asc' ? cmp : -cmp;
   });
 
   return (
@@ -120,19 +215,19 @@ export function DocumentsTable({
         <table className="w-full text-left text-sm">
           <thead className="bg-zinc-50 dark:bg-zinc-900 text-xs uppercase text-zinc-500">
             <tr>
-              <th className="px-3 py-2">Document</th>
-              <th className="px-3 py-2">Uploaded by</th>
-              <th className="px-3 py-2">Clearance</th>
-              <th className="px-3 py-2">Department</th>
-              <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Updated</th>
+              <SortableTh label="Document" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+              <SortableTh label="Uploaded by" sortKey="uploadedByName" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+              <SortableTh label="Clearance" sortKey="clearanceLevel" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+              <SortableTh label="Department" sortKey="department" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+              <SortableTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+              <SortableTh label="Updated" sortKey="updatedAt" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
               <th className="sticky right-0 bg-zinc-50 px-3 py-2 shadow-[-8px_0_8px_-6px_rgba(0,0,0,0.15)] dark:bg-zinc-900">
                 Actions
               </th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((d) => (
+            {sorted.map((d) => (
               <DocumentRow
                 key={d.id}
                 doc={d}
