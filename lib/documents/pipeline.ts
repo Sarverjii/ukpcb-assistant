@@ -35,21 +35,35 @@ const PDF_OCR_PROMPT =
   'preserving structure (headings, tables, lists) as plain text. If handwritten, do your best to ' +
   'read it. Output only the transcription, no commentary.';
 
-// Wall-clock budget for ONE processDocument() pass's OCR work, measured
-// from the top of the function. A vision-model transcription call takes
-// several real seconds — measured directly against Gemini flash-lite:
-// 10-16s per page, sequential (a 3-page CONCURRENT batch measured even
-// slower, ~55-58s each, so pages are OCR'd one at a time, not in
-// parallel). Every route/action that reaches processDocument() shares a
-// 60s maxDuration (see app/api/documents/upload/route.ts's own comment) —
-// 40s leaves real margin for the document fetch, pdf-parse pass,
-// rasterization, embedding calls, and DB writes that also happen in the
-// same invocation. A scanned document longer than fits in one pass simply
-// resumes on the next pass (see the module comment below) rather than
-// risking the whole invocation getting silently killed mid-write, which
-// this codebase has hit before (see knowledge-base/actions.ts's crawl
-// history) and treats as strictly worse than an honest multi-pass resume.
-const PASS_BUDGET_MS = 40_000;
+// Wall-clock budget for ONE processDocument() pass's OCR work, checked
+// before starting each new page — NOT a hard ceiling on a page already in
+// flight, which matters: this only stops a pass from STARTING another
+// page once it's over budget, so the real safety margin has to cover one
+// full extra page beyond this number, not just up to it.
+//
+// Was 40_000, measured against local testing (Gemini flash-lite: 10-16s
+// per page sequential, a 3-page CONCURRENT batch measured even slower —
+// pages are OCR'd one at a time on purpose). Confirmed directly against
+// PRODUCTION to be too high: real per-page latency there reached ~32s
+// (network path to the provider, cold starts, etc. all add up in a way
+// local testing doesn't capture), and a pass that starts a page at ~38s
+// in can still be running well past Vercel's real 60s maxDuration,
+// getting silently killed mid-write. Confirmed as a real bug, not
+// theoretical: a production test run produced duplicate chunks on three
+// separate pages from exactly this — see
+// lib/db/queries/documents.ts::claimDocumentForProcessing's LOCK_STALE_MS
+// comment for the other half of that same fix. 20s leaves real margin
+// even against the ~32s worst case actually measured: a pass essentially
+// never starts a second page once one has already run long, so it
+// finishes cleanly well inside 60s far more reliably than 40s did. Every
+// route/action that reaches processDocument() shares that 60s maxDuration
+// (see app/api/documents/upload/route.ts's own comment). A scanned
+// document longer than fits in one pass simply resumes on the next pass
+// (see the module comment below) rather than risking the whole invocation
+// getting silently killed mid-write, which this codebase has hit before
+// (see knowledge-base/actions.ts's crawl history) and treats as strictly
+// worse than an honest, if slower, multi-pass resume.
+const PASS_BUDGET_MS = 20_000;
 
 type PendingChunk = { index: number; content: string; pageNumber: number | null };
 

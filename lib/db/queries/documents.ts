@@ -249,10 +249,21 @@ export function setOcrProgress(id: string, done: number, total: number) {
 
 // A lock older than this is treated as abandoned (the invocation holding
 // it crashed, or was killed by the platform mid-pass, before reaching its
-// own release) rather than genuinely still running — comfortably longer
-// than pipeline.ts's own PASS_BUDGET_MS (40s) plus the request overhead
-// around it, so a real, still-active pass never looks stale here.
-const LOCK_STALE_MS = 55_000;
+// own release) rather than genuinely still running.
+//
+// Was 55_000 — measured directly against production to be too close to
+// Vercel's real 60s maxDuration and NOT enough: pipeline.ts's own
+// PASS_BUDGET_MS only checks the clock BEFORE starting a new page, so an
+// invocation already mid-flight on one slow vision call (production
+// measured real per-page latency up to ~32s, well above local testing's
+// 10-16s) can still be alive, past 55s, when a second invocation decides
+// the lock looks stale and reclaims it — a real test run on production
+// produced duplicate chunks for three different pages from exactly this
+// window. 90s sits comfortably past the platform's actual 60s kill
+// boundary (not just this app's own internal budget check), so a reclaim
+// only ever happens once the original invocation is provably dead, not
+// while it might still be a zombie finishing its last write.
+const LOCK_STALE_MS = 90_000;
 
 /**
  * A real hold-for-the-duration lock — see Document.processingClaimedAt's
