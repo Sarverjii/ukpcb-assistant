@@ -4,6 +4,7 @@ import { requireCanUploadDocuments, ForbiddenError } from '@/lib/auth/rbac';
 import { getStorageProvider } from '@/lib/documents/storage';
 import { SUPPORTED_MIME_TYPES } from '@/lib/documents/textExtraction';
 import { createDocument } from '@/lib/db/queries/documents';
+import { requireNonEmptyDepartments } from '@/lib/db/queries/departments';
 import { processDocument } from '@/lib/documents/pipeline';
 import { logAuditEvent } from '@/lib/audit/log';
 import { config } from '@/lib/config';
@@ -66,6 +67,10 @@ export async function POST(request: Request) {
       { error: 'You cannot assign a clearance level above your own.' },
       { status: 403 },
     );
+  }
+  const departmentError = requireNonEmptyDepartments(departmentIds, 'document');
+  if (departmentError) {
+    return NextResponse.json({ error: departmentError }, { status: 400 });
   }
   if (!SUPPORTED_MIME_TYPES.includes(file.type)) {
     return NextResponse.json(

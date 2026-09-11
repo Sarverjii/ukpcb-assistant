@@ -26,8 +26,11 @@ type Department = {
  * precedent for "browsable cards" in this app. A trailing "No department"
  * card — styled distinctly (dashed border, not a real Department row) —
  * links to a lightweight worklist of employees currently in zero
- * departments, since membership is optional and that's an expected,
- * ordinary state worth being able to find and act on.
+ * departments. Every employee is now required to belong to at least one
+ * (see lib/db/queries/departments.ts's requireNonEmptyDepartments), so a
+ * non-zero count here is a real violation to fix, not an ordinary state —
+ * it can only happen to an employee who predates that policy (never to
+ * one created since) — hence the amber warning styling once count > 0.
  */
 export function DepartmentGrid({
   departments,
@@ -92,14 +95,24 @@ export function DepartmentGrid({
 
         <Link
           href="/admin/departments/none"
-          className="flex flex-col gap-3 rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 p-4 hover:border-brand-400 dark:hover:border-brand-500 transition-colors"
+          className={`flex flex-col gap-3 rounded-xl border border-dashed p-4 transition-colors ${
+            noDepartmentCount > 0
+              ? 'border-amber-300 dark:border-amber-800 hover:border-amber-400 dark:hover:border-amber-600'
+              : 'border-zinc-300 dark:border-zinc-700 hover:border-brand-400 dark:hover:border-brand-500'
+          }`}
         >
-          <div className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
+          <div
+            className={`flex items-center gap-1.5 ${
+              noDepartmentCount > 0 ? 'text-amber-700 dark:text-amber-400' : 'text-zinc-500 dark:text-zinc-400'
+            }`}
+          >
             <UserX size={14} />
             <p className="text-sm font-semibold">No department</p>
           </div>
           <p className="text-xs text-zinc-400 dark:text-zinc-500">
-            Employees not currently in any department.
+            {noDepartmentCount > 0
+              ? 'Predate the department policy — assign one to fix.'
+              : 'Every employee belongs to at least one department.'}
           </p>
           <div className="mt-auto flex items-center gap-1.5 border-t border-zinc-100 dark:border-zinc-800 pt-3 text-xs text-zinc-500 dark:text-zinc-400">
             <Users size={13} /> {noDepartmentCount} employee{noDepartmentCount === 1 ? '' : 's'}

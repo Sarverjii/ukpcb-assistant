@@ -45,7 +45,7 @@ export function DepartmentPicker({
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0, maxHeight: 240, openUpward: false });
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -92,7 +92,30 @@ export function DepartmentPicker({
   function handleToggleOpen() {
     if (!open && triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
-      setCoords({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+      const MARGIN = 8;
+      const PREFERRED = 240; // matches max-h-60 below
+      const spaceBelow = window.innerHeight - rect.bottom - MARGIN;
+      const spaceAbove = rect.top - MARGIN;
+      // Open downward whenever there's room for the preferred height (the
+      // common case); otherwise pick whichever side actually has more
+      // room and clamp the panel's own height to fit inside it — a
+      // trigger near the bottom of the viewport (e.g. the last row of a
+      // long table, exactly what the Employees table's own last row hits)
+      // used to always open downward regardless of available space, which
+      // silently pushed most of the checkbox list off-screen: still
+      // reachable in the DOM (so an automated `find`/click can hit it),
+      // but genuinely un-clickable for a real person, who has no way to
+      // scroll a `position: fixed` panel further into view without
+      // triggering handleScroll's close-on-scroll behavior first.
+      const openUpward = spaceBelow < PREFERRED && spaceAbove > spaceBelow;
+      const maxHeight = Math.max(120, Math.min(PREFERRED, openUpward ? spaceAbove : spaceBelow));
+      setCoords({
+        top: openUpward ? rect.top - maxHeight - 4 : rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+        maxHeight,
+        openUpward,
+      });
     }
     setOpen((o) => !o);
   }
@@ -138,34 +161,59 @@ export function DepartmentPicker({
         createPortal(
           <div
             ref={panelRef}
-            style={{ top: coords.top, left: coords.left, minWidth: Math.max(coords.width, 192) }}
-            className="fixed z-50 max-h-60 overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1 shadow-lg"
+            style={{
+              top: Math.max(8, coords.top),
+              left: coords.left,
+              minWidth: Math.max(coords.width, 192),
+              maxHeight: coords.maxHeight,
+            }}
+            className="fixed z-50 flex flex-col rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg"
           >
-            {departments.length === 0 && (
-              <p className="px-3 py-2 text-xs text-zinc-400">No departments exist yet.</p>
-            )}
-            {departments.map((d) => {
-              const checked = selectedIds.includes(d.id);
-              return (
+            {departments.length > 1 && (
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-zinc-100 dark:border-zinc-800 px-3 py-1.5 text-xs">
                 <button
-                  key={d.id}
                   type="button"
-                  onClick={() => toggle(d.id)}
-                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  onClick={() => onChange(departments.map((d) => d.id))}
+                  className="font-medium text-brand-600 hover:underline"
                 >
-                  <span
-                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                      checked
-                        ? 'border-brand-600 bg-brand-600 text-white'
-                        : 'border-zinc-300 dark:border-zinc-600'
-                    }`}
-                  >
-                    {checked && <Check size={12} />}
-                  </span>
-                  {d.name}
+                  Select all
                 </button>
-              );
-            })}
+                <button
+                  type="button"
+                  onClick={() => onChange([])}
+                  className="font-medium text-zinc-500 hover:underline dark:text-zinc-400"
+                >
+                  Clear all
+                </button>
+              </div>
+            )}
+            <div className="overflow-y-auto py-1">
+              {departments.length === 0 && (
+                <p className="px-3 py-2 text-xs text-zinc-400">No departments exist yet.</p>
+              )}
+              {departments.map((d) => {
+                const checked = selectedIds.includes(d.id);
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => toggle(d.id)}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  >
+                    <span
+                      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                        checked
+                          ? 'border-brand-600 bg-brand-600 text-white'
+                          : 'border-zinc-300 dark:border-zinc-600'
+                      }`}
+                    >
+                      {checked && <Check size={12} />}
+                    </span>
+                    {d.name}
+                  </button>
+                );
+              })}
+            </div>
           </div>,
           document.body,
         )}

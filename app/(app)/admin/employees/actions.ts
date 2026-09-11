@@ -19,7 +19,7 @@ import {
   deleteUser,
   getExistingEmailSet,
 } from '@/lib/db/queries/users';
-import { listDepartments } from '@/lib/db/queries/departments';
+import { listDepartments, requireNonEmptyDepartments } from '@/lib/db/queries/departments';
 import { listDocumentsByUploader } from '@/lib/db/queries/documents';
 import { countConversationsForUser } from '@/lib/db/queries/conversations';
 import {
@@ -49,6 +49,8 @@ export async function createEmployeeAction(formData: FormData): Promise<ActionRe
   if (!name || !email || !roleId) {
     return { error: 'Name, email, and role are required.' };
   }
+  const departmentError = requireNonEmptyDepartments(departmentIds, 'employee');
+  if (departmentError) return { error: departmentError };
 
   const tempPassword = generateTempPassword();
   const passwordHash = await hashPassword(tempPassword);
@@ -96,6 +98,9 @@ export async function changeEmployeeDepartmentsAction(
 ): Promise<ActionResult> {
   const ctx = await getAuthContext();
   await requireAdmin(ctx);
+
+  const departmentError = requireNonEmptyDepartments(departmentIds, 'employee');
+  if (departmentError) return { error: departmentError };
 
   const before = await getUserById(userId);
   await updateUserDepartments(userId, departmentIds);
@@ -491,6 +496,7 @@ async function importOneRow(
   });
 
   if (!row.name || !row.email || !row.roleName) return fail('Missing name, email, or role.');
+  if (row.departmentNames.length === 0) return fail('Missing department — every employee must belong to at least one.');
   if (seenEmails.has(row.email)) return fail('Duplicate email within this file.');
   seenEmails.add(row.email);
 

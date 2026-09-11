@@ -279,11 +279,19 @@ function DocumentRow({
   }
 
   function handleDepartmentsChange(ids: string[]) {
+    const previous = departmentIds;
     setDepartmentIds(ids);
     setError(null);
     startTransition(async () => {
       const result = await changeDocumentDepartmentsAction(doc.id, ids);
-      if (result.error) setError(result.error);
+      if (result.error) {
+        setError(result.error);
+        // Revert the optimistic update — every document must keep at
+        // least one department, so a rejected "Clear all" would otherwise
+        // leave the picker showing none selected despite the real row
+        // still having its old ones, until the next full page load.
+        setDepartmentIds(previous);
+      }
     });
   }
 

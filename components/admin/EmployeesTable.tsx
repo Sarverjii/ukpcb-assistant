@@ -191,11 +191,20 @@ function EmployeeRow({
   }
 
   function handleDepartmentsChange(ids: string[]) {
+    const previous = departmentIds;
     setDepartmentIds(ids);
     setError(null);
     startTransition(async () => {
       const result = await changeEmployeeDepartmentsAction(user.id, ids);
-      if (result.error) setError(result.error);
+      if (result.error) {
+        setError(result.error);
+        // Revert the optimistic update — e.g. "Clear all" down to zero
+        // departments is rejected server-side (every employee must keep
+        // at least one), and without this the picker would keep showing
+        // "—" (no departments) even though the real DB row still has its
+        // old ones, staying wrong until the next full page load.
+        setDepartmentIds(previous);
+      }
     });
   }
 

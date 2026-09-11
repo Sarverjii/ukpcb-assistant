@@ -1,6 +1,23 @@
 import { prisma } from '@/lib/db/prisma';
 
 /**
+ * Every employee and every document must belong to at least one
+ * department — a deliberate policy decision (not the original design:
+ * see PROJECT_CONTEXT.md for the "clearance alone governs a departmentless
+ * document" model this replaces). Enforced here as one shared, reusable
+ * check rather than duplicated per call site, so every creation/edit path
+ * (employee create, employee department edit, bulk import, document
+ * upload — both the plain and Blob-token routes — document department
+ * edit) rejects an empty department list with the exact same message.
+ * Pure and synchronous on purpose: every call site already has the
+ * candidate id array in hand, so this never needs its own DB round trip.
+ */
+export function requireNonEmptyDepartments(departmentIds: string[], kind: 'employee' | 'document'): string | null {
+  if (departmentIds.length > 0) return null;
+  return `Select at least one department — every ${kind} must belong to at least one.`;
+}
+
+/**
  * The single source of truth for "what departments exist" — every
  * department picker/filter in the app (document upload/edit, the
  * employee-side DepartmentPicker, both tables' filter dropdowns) fetches
@@ -93,6 +110,36 @@ export async function deleteDepartment(id: string): Promise<void> {
       }),
     ),
   ]);
+}
+
+/**
+ * Everyone/everything for whom `departmentId` is their ONLY department —
+ * i.e. who would be left with zero once it's gone. Used to block an
+ * operation that would otherwise violate the "every employee and every
+ * document belongs to at least one department" policy (see
+ * requireNonEmptyDepartments above) rather than silently creating the
+ * exact null state that policy exists to prevent. `some` + `every` on the
+ * same relation together mean "has this department, AND every department
+ * it has IS this one" — the precise "this is their only one" condition;
+ * `every` alone would also match someone/something with ZERO departments
+ * (vacuously true on an empty relation), which is a different, pre-
+ * existing state this check has no business flagging.
+ */
+export async function findSoleDependents(departmentId: string): Promise<{ users: string[]; documents: string[] }> {
+  const [users, documents] = await Promise.all([
+    prisma.user.findMany({
+      where: {
+        status: { not: 'REMOVED' },
+        departments: { some: { id: departmentId }, every: { id: departmentId } },
+      },
+      select: { name: true },
+    }),
+    prisma.document.findMany({
+      where: { departments: { some: { id: departmentId }, every: { id: departmentId } } },
+      select: { name: true },
+    }),
+  ]);
+  return { users: users.map((u) => u.name), documents: documents.map((d) => d.name) };
 }
 
 /** A department's current members and head, for the detail/membership page. */

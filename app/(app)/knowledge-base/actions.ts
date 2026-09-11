@@ -14,6 +14,7 @@ import {
   updateDocumentFile,
   listIngestedSourceUrls,
 } from '@/lib/db/queries/documents';
+import { listDepartments, requireNonEmptyDepartments } from '@/lib/db/queries/departments';
 import {
   deleteChunksForDocument,
   updateChunksClearanceForDocument,
@@ -94,6 +95,9 @@ export async function changeDocumentDepartmentsAction(
     if (err instanceof ForbiddenError) return { error: err.message };
     throw err;
   }
+
+  const departmentError = requireNonEmptyDepartments(departmentIds, 'document');
+  if (departmentError) return { error: departmentError };
 
   await updateDocumentDepartments(documentId, departmentIds);
   await updateChunksDepartmentsForDocument(documentId, departmentIds);
@@ -262,15 +266,17 @@ export async function finalizeReplaceDocumentAction(
 /**
  * Adds a document by fetching a web page rather than uploading a file —
  * per an explicit request that URL-sourced content always be visible to
- * every department regardless of who added it. Deliberately never accepts
- * a departmentIds param at all: departments is left unset on
- * createDocument, and lib/db/queries/chunks.ts's own retrieval query
- * already treats a chunk with zero departments as visible to everyone
- * (its `cardinality(departmentIds) = 0` branch) — the exact "public/open
- * to all departments" behavior asked for, achieved by reusing an already-
- * shipped, already-tested rule rather than adding a new one. Clearance
- * still applies exactly as it does for an uploaded file: whatever level
- * the person adding it chooses, capped at their own.
+ * every department regardless of who added it. Achieves that by tagging
+ * every page with the FULL current department list (passed in by the
+ * caller, `addDocumentFromUrlAction`, as `allDepartmentIds`) rather than
+ * leaving departments unset — department is mandatory on every document
+ * now, so "visible to everyone" has to be reached by actually covering
+ * every department, not by exploiting the old zero-departments-means-
+ * everyone branch lib/db/queries/chunks.ts's retrieval query still
+ * technically has (that branch now only matters for pre-existing rows
+ * from before this policy; nothing new is ever created that way again).
+ * Clearance still applies exactly as it does for an uploaded file:
+ * whatever level the person adding it chooses, capped at their own.
  *
  * The fetched HTML is saved through the storage provider and run through
  * the exact same processDocument pipeline as any other upload — text
@@ -314,6 +320,7 @@ async function saveFetchedPageAsDocument(
   page: { html: string; title: string | null; contentType: 'text/html' | 'text/plain' },
   url: string,
   clearanceLevel: number,
+  departmentIds: string[],
   uploadedById: string,
 ): Promise<string> {
   const name = page.title || url;
@@ -328,6 +335,7 @@ async function saveFetchedPageAsDocument(
     mimeType: page.contentType,
     fileSizeBytes: buffer.byteLength,
     clearanceLevel,
+    departmentIds,
     uploadedById,
     sourceUrl: url,
   });
@@ -380,14 +388,25 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
   if (!url) return { error: 'A URL is required.' };
 
   // Per explicit request: URL-sourced content is public to every employee
-  // regardless of clearance, not just every department (departments is
-  // already left unset below for that half — see saveFetchedPageAsDocument's
-  // own comment). Using the lowest rank currently configured — rather than
-  // a hardcoded constant — means this keeps meaning "everyone" even if the
-  // hierarchy is later restructured (e.g. a new, even-lower role added).
+  // regardless of clearance or department. The clearance half uses the
+  // lowest rank currently configured — rather than a hardcoded constant —
+  // so this keeps meaning "everyone" even if the hierarchy is later
+  // restructured (e.g. a new, even-lower role added). The department half
+  // used to rely on leaving departments unset entirely (the retrieval
+  // query's dedicated "zero departments = clearance alone" branch) — now
+  // that every document must belong to at least one department, "every
+  // department" is what achieves the same "everyone" guarantee instead:
+  // tagging with the full current list means every employee's own
+  // department (itself now mandatory) is always in the overlap, so
+  // clearance is once again the only thing actually gating visibility —
+  // see saveFetchedPageAsDocument's own comment.
   const lowestRole = await getLowestRole();
   if (!lowestRole) return { error: 'No roles are configured yet.' };
   const clearanceLevel = lowestRole.hierarchyRank;
+
+  const allDepartments = await listDepartments();
+  if (allDepartments.length === 0) return { error: 'No departments are configured yet.' };
+  const allDepartmentIds = allDepartments.map((d) => d.id);
 
   let rootUrl: URL;
   try {
@@ -413,7 +432,7 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
   const existingUrls = await listIngestedSourceUrls();
   const documentIds = existingUrls.includes(url)
     ? []
-    : [await saveFetchedPageAsDocument(rootPage, url, clearanceLevel, ctx.userId)];
+    : [await saveFetchedPageAsDocument(rootPage, url, clearanceLevel, allDepartmentIds, ctx.userId)];
 
   // Crawl mode: same-domain pages reachable from the root page within
   // crawlDepth hops, fetched and added the same way, up to the cap
@@ -437,7 +456,7 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
         if (documentIds.length >= MAX_CRAWL_PAGES) break;
         try {
           const linkedPage = await fetchUrlForIngestion(link);
-          documentIds.push(await saveFetchedPageAsDocument(linkedPage, link, clearanceLevel, ctx.userId));
+          documentIds.push(await saveFetchedPageAsDocument(linkedPage, link, clearanceLevel, allDepartmentIds, ctx.userId));
           if (linkedPage.contentType === 'text/html') {
             for (const deeper of discoverSameDomainLinks(linkedPage.html, rootUrl)) {
               if (!seen.has(deeper)) {

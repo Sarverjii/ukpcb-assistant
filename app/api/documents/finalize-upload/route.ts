@@ -3,6 +3,7 @@ import { getAuthContext, UnauthenticatedError } from '@/lib/auth/session';
 import { requireCanUploadDocuments, ForbiddenError } from '@/lib/auth/rbac';
 import { SUPPORTED_MIME_TYPES } from '@/lib/documents/textExtraction';
 import { createDocument } from '@/lib/db/queries/documents';
+import { requireNonEmptyDepartments } from '@/lib/db/queries/departments';
 import { processDocument } from '@/lib/documents/pipeline';
 import { logAuditEvent } from '@/lib/audit/log';
 
@@ -64,6 +65,10 @@ export async function POST(request: Request) {
   }
   if (!Number.isFinite(fileSizeBytes) || fileSizeBytes <= 0) {
     return NextResponse.json({ error: 'Invalid file size.' }, { status: 400 });
+  }
+  const departmentError = requireNonEmptyDepartments(departmentIds, 'document');
+  if (departmentError) {
+    return NextResponse.json({ error: departmentError }, { status: 400 });
   }
 
   const document = await createDocument({

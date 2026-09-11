@@ -310,7 +310,7 @@ function SingleUpload({
             />
           </Field>
 
-          <Field label="Departments">
+          <Field label="Departments" required>
             <DepartmentCheckboxList
               departments={departments}
               selectedIds={departmentIds}
@@ -334,8 +334,11 @@ function SingleUpload({
           // so there's no browser "please fill in this field" validation
           // to lean on the way the old <select required> got for free —
           // this disabled check is now the only thing stopping a submit
-          // with no clearance level chosen.
-          disabled={busy || !!validationError || !clearanceLevel}
+          // with no clearance level chosen. departmentIds defaults to
+          // every department checked, so hitting zero here means an admin
+          // actively unchecked all of them — still blocked, same as a
+          // missing clearance level (every document needs at least one).
+          disabled={busy || !!validationError || !clearanceLevel || departmentIds.length === 0}
           className="rounded-lg bg-brand-700 dark:bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 dark:hover:bg-brand-500 disabled:opacity-60"
         >
           Upload
@@ -436,14 +439,14 @@ function BulkUploadPicker({
       <Field label="Clearance level for all files" required>
         <ClearanceLevelPicker roles={roles} value={clearanceLevel} onChange={(rank) => setClearanceLevel(String(rank))} />
       </Field>
-      <Field label="Departments (applies to all files in this batch)">
+      <Field label="Departments (applies to all files in this batch)" required>
         <DepartmentCheckboxList departments={departments} selectedIds={departmentIds} onChange={setDepartmentIds} />
       </Field>
 
       <button
         type="button"
         onClick={() => onStart(Number(clearanceLevel), departmentIds, validFiles)}
-        disabled={!clearanceLevel || validFiles.length === 0}
+        disabled={!clearanceLevel || validFiles.length === 0 || departmentIds.length === 0}
         className="self-start rounded-lg bg-brand-700 dark:bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 dark:hover:bg-brand-500 disabled:opacity-60"
       >
         Upload {validFiles.length} file{validFiles.length === 1 ? '' : 's'}

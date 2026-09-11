@@ -12,9 +12,25 @@ import {
   getDepartmentById,
   addDepartmentMember,
   removeDepartmentMember,
+  findSoleDependents,
 } from '@/lib/db/queries/departments';
 
 export type ActionResult = { error?: string };
+
+/**
+ * Every employee and every document must keep at least one department —
+ * shared by deleteDepartmentAction and removeDepartmentMemberAction,
+ * the two actions that can otherwise strip someone/something down to
+ * their last one. Names a few examples directly in the error rather than
+ * just a count, since "3 people/documents" alone doesn't tell an admin
+ * who they'd need to re-tag first to proceed.
+ */
+function describeSoleDependents(users: string[], documents: string[]): string {
+  const parts: string[] = [];
+  if (users.length > 0) parts.push(`employee${users.length === 1 ? '' : 's'} ${users.slice(0, 3).join(', ')}${users.length > 3 ? `, and ${users.length - 3} more` : ''}`);
+  if (documents.length > 0) parts.push(`document${documents.length === 1 ? '' : 's'} ${documents.slice(0, 3).join(', ')}${documents.length > 3 ? `, and ${documents.length - 3} more` : ''}`);
+  return `This is the only department for ${parts.join(' and ')} — every employee and every document must belong to at least one. Assign ${parts.length > 1 ? 'them' : 'it'} to another department first.`;
+}
 
 export async function createDepartmentAction(formData: FormData): Promise<ActionResult> {
   const ctx = await getAuthContext();
@@ -115,12 +131,21 @@ export async function updateDepartmentAction(
  * confirm in the UI, not a password re-auth dialog: unlike deleting an
  * employee or a document, nothing here destroys real content — every
  * effect is a detached relationship, trivially reversible by re-tagging.
+ *
+ * Refused outright (findSoleDependents) if this is the ONLY department
+ * for any current employee or document — every employee and every
+ * document must belong to at least one, so deleting their last one would
+ * silently create the exact null state that policy exists to prevent.
  */
 export async function deleteDepartmentAction(departmentId: string): Promise<ActionResult> {
   const ctx = await getAuthContext();
   await requireAdmin(ctx);
 
   const dept = await getDepartmentById(departmentId);
+  const { users, documents } = await findSoleDependents(departmentId);
+  if (users.length > 0 || documents.length > 0) {
+    return { error: describeSoleDependents(users, documents) };
+  }
   await deleteDepartment(departmentId);
   await logAuditEvent({
     action: 'DEPARTMENT_DELETED',
@@ -161,6 +186,9 @@ export async function removeDepartmentMemberAction(departmentId: string, userId:
   await requireAdmin(ctx);
 
   const [dept, employee] = await Promise.all([getDepartmentById(departmentId), getUserById(userId)]);
+  if (employee.departments.length === 1 && employee.departments[0].id === departmentId) {
+    return { error: `${employee.name} has no other department — every employee must belong to at least one. Add them to another department first.` };
+  }
   await removeDepartmentMember(departmentId, userId);
   // A department's head must also be a member — if the employee being
   // removed was the head, the head designation is cleared along with

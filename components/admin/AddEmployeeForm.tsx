@@ -80,13 +80,14 @@ export function AddEmployeeForm({ roles, departments }: { roles: Role[]; departm
             departments={departments}
             selectedIds={departmentIds}
             onChange={setDepartmentIds}
-            placeholder="Departments (optional)"
+            placeholder="Select department(s)…"
           />
 
           <div className="col-span-1 flex items-center gap-3 sm:col-span-2">
             <button
               type="submit"
-              disabled={pending}
+              disabled={pending || departmentIds.length === 0}
+              title={departmentIds.length === 0 ? 'Select at least one department first' : undefined}
               className="rounded-lg bg-brand-700 dark:bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 dark:hover:bg-brand-500 disabled:opacity-60"
             >
               Create employee
