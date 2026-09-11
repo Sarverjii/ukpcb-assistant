@@ -45,7 +45,7 @@ export class UsageLimitExceededError extends Error {
 
   constructor(scope: 'ORG' | 'DEPARTMENT' | 'USER', limit: number, used: number, departmentName?: string) {
     const messages = {
-      ORG: `Ask Evon has reached its company-wide daily message limit (${limit}). This resets at midnight UTC — please try again tomorrow, or ask an admin to raise the limit in Admin → Usage Limits.`,
+      ORG: `UKPCB Assistant has reached its organization-wide daily message limit (${limit}). This resets at midnight UTC — please try again tomorrow, or ask an admin to raise the limit in Admin → Usage Limits.`,
       DEPARTMENT: `${departmentName ?? 'Your department'} has reached its daily message limit (${limit}) for today. This resets at midnight UTC, or an admin can raise it in Admin → Usage Limits.`,
       USER: `You've reached your daily message limit (${limit}) for today. This resets at midnight UTC, or an admin can raise your limit in Admin → Employees.`,
     };

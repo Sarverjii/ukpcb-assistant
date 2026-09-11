@@ -3,14 +3,14 @@ import type { Prisma } from '@prisma/client';
 /**
  * Turns one audit log entry into a plain-English sentence — "deleted a
  * document, resource abc123" told an admin nothing they could act on;
- * "CXO Admin deleted document 'Case Study - Julius'" does. Relies entirely
+ * "Member Secretary Admin deleted document 'Case Study - Julius'" does. Relies entirely
  * on metadata captured at write time (see each action's own logAuditEvent
  * call) — this never re-fetches the entity the entry is about, since by
  * the time someone's reading the log it may well be gone (that's exactly
  * the case a deletion entry needs to survive).
  *
  * `roleNameByRank` resolves a raw clearanceLevel number (rank) to its
- * role's current name, e.g. clearance level 3 → "Architect" — falls back
+ * role's current name, e.g. clearance level 3 → "Scientific Officer" — falls back
  * to "level N" if the rank isn't found (the role itself may have since
  * been renamed or removed).
  */

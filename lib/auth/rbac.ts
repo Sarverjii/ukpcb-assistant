@@ -10,7 +10,7 @@ export class ForbiddenError extends Error {
 
 /**
  * Capability check against a data-driven Role flag (Role.canUploadDocuments)
- * rather than an `if (role === 'CXO')` string comparison — so granting a
+ * rather than an `if (role === 'Member Secretary')` string comparison — so granting a
  * new role upload rights is a database update, not a code change.
  */
 export async function requireCanUploadDocuments(ctx: AuthContext): Promise<void> {

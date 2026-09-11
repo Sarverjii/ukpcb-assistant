@@ -46,7 +46,7 @@ yarn-error.log*
 # source files for the demo corpus — already processed into the database
 # (chunks + embeddings), so not needed in git; 123MB of PDFs/DOCX/PPTX with
 # no reason to bloat the repo or hit GitHub's file-size limits.
-/EVON_Documents/
+/UKPCB_Documents/
 
 # real, working passwords for every seeded test account — never commit
 # this, especially to a repo that might end up shared or public.

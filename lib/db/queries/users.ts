@@ -29,7 +29,7 @@ export function listUsersWithRole() {
  * real, expected state, not an error. Backs the admin "No department"
  * page (a lightweight companion to the real Departments — not a
  * Department row itself, just a worklist for assigning these people
- * somewhere) and the Evon Directory's own "No department" group.
+ * somewhere) and the UKPCB Directory's own "No department" group.
  */
 export function listUsersWithoutDepartment() {
   return prisma.user.findMany({
@@ -59,7 +59,7 @@ export function listAllActiveUsersForExport() {
 }
 
 /**
- * Backs the Evon Directory — deliberately the narrowest possible shape:
+ * Backs the UKPCB Directory — deliberately the narrowest possible shape:
  * name, email, role name, and department names only. No status, no
  * clearance rank, no provenance, nothing an ordinary employee shouldn't
  * see about a colleague. Excludes DISABLED and REMOVED the same way

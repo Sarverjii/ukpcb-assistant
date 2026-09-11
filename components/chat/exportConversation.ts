@@ -12,7 +12,7 @@ function messageCitationsLine(m: ChatMessage): string | null {
 export function conversationToMarkdown(title: string, messages: ChatMessage[]): string {
   const lines = [`# ${title}`, ''];
   for (const m of messages) {
-    lines.push(m.role === 'USER' ? '**You**' : '**Ask Evon**');
+    lines.push(m.role === 'USER' ? '**You**' : '**UKPCB Assistant**');
     lines.push('');
     lines.push(m.content);
     const sources = messageCitationsLine(m);
@@ -69,7 +69,7 @@ export function exportConversationAsPdf(title: string, messages: ChatMessage[]):
       const sources = messageCitationsLine(m);
       return `
         <div class="msg">
-          <div class="role">${m.role === 'USER' ? 'You' : 'Ask Evon'}</div>
+          <div class="role">${m.role === 'USER' ? 'You' : 'UKPCB Assistant'}</div>
           <div class="content">${escapeHtml(m.content)}</div>
           ${sources ? `<div class="sources">${escapeHtml(sources)}</div>` : ''}
         </div>`;

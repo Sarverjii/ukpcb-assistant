@@ -1,7 +1,7 @@
 import { getAuthContext } from '@/lib/auth/session';
 import { listDirectoryEntries } from '@/lib/db/queries/users';
 import { listDepartmentsWithStats } from '@/lib/db/queries/departments';
-import { EvonDirectory } from '@/components/directory/EvonDirectory';
+import { UkpcbDirectory } from '@/components/directory/UkpcbDirectory';
 
 // Every authenticated active employee can browse this — same gating as
 // the Document Library (/documents): no canUploadDocuments/isAdmin check,
@@ -14,12 +14,12 @@ export default async function DirectoryPage() {
 
   return (
     <main className="mx-auto max-w-[100rem] px-4 py-10 sm:px-6">
-      <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">Evon Directory</h1>
+      <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">UKPCB Directory</h1>
       <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-        Find anyone at Evon by name, email, or department — {entries.length} people.
+        Find anyone at UKPCB by name, email, or department — {entries.length} people.
       </p>
       <div className="mt-6">
-        <EvonDirectory
+        <UkpcbDirectory
           people={entries.map((e) => ({
             id: e.id,
             name: e.name,

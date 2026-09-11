@@ -6,7 +6,7 @@ import type { DocumentRow } from '@/components/documents/DocumentsTable';
 /**
  * Groups every website-sourced document by its source domain — "click the
  * domain name to see all the pages saved under it" (an explicit request).
- * Collapsed `<details>` per domain, same pattern EvonDirectory already
+ * Collapsed `<details>` per domain, same pattern UkpcbDirectory already
  * uses for its department groups, rather than a new disclosure widget.
  *
  * Lives entirely on its own tab now (KnowledgeBase.tsx's "Websites" tab) —

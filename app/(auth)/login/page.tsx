@@ -24,16 +24,16 @@ export default async function LoginPage({
 
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center text-center">
-          {/* Plain <img>, not next/image: Next's image optimizer blocks SVG
-              by default (a security default, since SVGs can carry script) —
-              and a static SVG gains nothing from raster optimization anyway. */}
+          {/* Plain <img>, not next/image: a static local asset gains nothing
+              from Next's on-demand raster optimization, and this skips its
+              image-domain config entirely. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.svg" alt="Evon" className="h-14 w-auto" />
+          <img src="/logo.png" alt="Uttarakhand Pollution Control Board" className="h-14 w-auto" />
           <h1 className="mt-5 text-xl font-semibold tracking-tight text-zinc-900 dark:text-white">
-            Ask Evon
+            UKPCB Assistant
           </h1>
           <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">
-            Sign in with your company account
+            Sign in with your Uttarakhand Pollution Control Board account
           </p>
         </div>
 

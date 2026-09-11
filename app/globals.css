@@ -13,15 +13,15 @@
 }
 
 /*
- * Brand palette, derived from the Evon logo mark (public/logo-mark.svg —
- * #034475 / #12507A navy). This is the app's one accent color: primary
- * actions, focus rings, active/selected states, and the sidebar all pull
- * from this scale rather than a generic UI-kit blue, so the product reads
- * as Evon's rather than a template's. Paired with a true-neutral gray scale
- * (Tailwind's zinc, not slate) for surfaces — slate carries a faint blue-
- * gray cast that fights the brand blue instead of setting it off; zinc
- * reads as genuine black/white/gray, closer to "black with blue" than
- * "blue-gray with blue".
+ * Brand palette, derived from the UKPCB seal (public/logo.png — #3b7f51
+ * green, brand-600 below is that exact color). This is the app's one
+ * accent color: primary actions, focus rings, active/selected states, and
+ * the sidebar all pull from this scale rather than a generic UI-kit blue,
+ * so the product reads as the Board's rather than a template's. Paired
+ * with a true-neutral gray scale (Tailwind's zinc, not slate) for surfaces
+ * — slate carries a faint blue-gray cast that fights the brand green
+ * instead of setting it off; zinc reads as genuine black/white/gray,
+ * closer to "black with green" than "blue-gray with green".
  */
 @theme inline {
   --color-background: var(--background);
@@ -29,23 +29,23 @@
   --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
 
-  --color-brand-50: #eef5fa;
-  --color-brand-100: #d8e8f3;
-  --color-brand-200: #b3d2e8;
-  --color-brand-300: #82b3d6;
-  --color-brand-400: #4f8fbe;
-  --color-brand-500: #2c6fa0;
-  --color-brand-600: #14507f;
-  --color-brand-700: #0f3f68;
-  --color-brand-800: #0c3354;
-  --color-brand-900: #092841;
-  --color-brand-950: #05192c;
+  --color-brand-50: #f3f9f5;
+  --color-brand-100: #e4f2e8;
+  --color-brand-200: #c6e2cf;
+  --color-brand-300: #9dcdad;
+  --color-brand-400: #6ab683;
+  --color-brand-500: #4a9e65;
+  --color-brand-600: #3b7f51;
+  --color-brand-700: #2f6841;
+  --color-brand-800: #245433;
+  --color-brand-900: #1b4328;
+  --color-brand-950: #102a19;
 }
 
 /* Dark theme — only when .dark is present (see @custom-variant above), never
- * from system preference. True near-black rather than the previous
- * navy-tinted dark, so the brand blue reads as a deliberate accent against
- * black rather than blending into an already-blue-ish background. */
+ * from system preference. True near-black rather than a tinted dark, so the
+ * brand green reads as a deliberate accent against black rather than
+ * blending into an already-tinted background. */
 :root.dark {
   --background: #08090a;
   --foreground: #edeef0;

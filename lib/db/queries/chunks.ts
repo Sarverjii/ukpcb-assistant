@@ -39,9 +39,9 @@ export type RetrievedChunk = {
  * belongs to a "head department" — see Department.isHeadDepartment, which
  * counts as membership in every department for this check, clearance
  * still required either way). Clearance is a hard requirement, not one
- * branch of an OR: a document set to "VP" clearance and "HR" department is
- * visible ONLY to someone who is BOTH VP-or-above AND in HR — not to every
- * VP+ employee regardless of department, and not to every HR employee
+ * branch of an OR: a document set to "Regional Officer" clearance and "Administrative Officer" department is
+ * visible ONLY to someone who is BOTH Regional-Officer-or-above AND in Administrative Officer — not to every
+ * Regional-Officer+ employee regardless of department, and not to every Administrative Officer employee
  * regardless of clearance. A document with NO department at all is
  * governed by clearance alone, exactly as if departments didn't exist —
  * the department condition only ever narrows, never widens, who a

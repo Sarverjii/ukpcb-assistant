@@ -459,7 +459,7 @@ export function ChatPanel({
             }
           }}
           rows={1}
-          placeholder="Message Evon…"
+          placeholder="Message UKPCB Assistant…"
           className="max-h-[200px] flex-1 resize-none bg-transparent py-1.5 text-sm text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400"
         />
         <button
@@ -472,7 +472,7 @@ export function ChatPanel({
         </button>
       </form>
       <p className="mx-auto mt-2 max-w-3xl text-center text-xs text-zinc-400">
-        Ask Evon answers only from documents your role is cleared to see.
+        UKPCB Assistant answers only from documents your role is cleared to see.
       </p>
     </>
   );
@@ -485,9 +485,9 @@ export function ChatPanel({
     return (
       <div className="flex h-full flex-col items-center justify-center px-4">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-semibold text-zinc-900 dark:text-white">Ask Evon</h1>
+          <h1 className="text-3xl font-semibold text-zinc-900 dark:text-white">UKPCB Assistant</h1>
           <p className="mt-2 text-zinc-500 dark:text-zinc-400">
-            What would you like to know about the company?
+            What would you like to know about the Board?
           </p>
         </div>
         <div className="w-full max-w-3xl">{inputBar}</div>

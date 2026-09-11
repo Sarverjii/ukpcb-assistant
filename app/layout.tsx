@@ -19,8 +19,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ask Evon",
-  description: "Role-based enterprise AI knowledge assistant",
+  title: "UKPCB Assistant",
+  description: "Role-based AI knowledge assistant for the Uttarakhand Pollution Control Board",
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {

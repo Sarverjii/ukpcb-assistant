@@ -52,7 +52,7 @@ export default async function KnowledgeBasePage() {
 
   return (
     <main className="mx-auto max-w-[100rem] px-4 py-10 sm:px-6">
-      <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">Evon Knowledge Base</h1>
+      <h1 className="text-xl font-semibold text-zinc-900 dark:text-white">UKPCB Knowledge Base</h1>
       <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
         Upload, search, and manage every document your role is cleared to work with — changes here
         take effect in chat immediately.

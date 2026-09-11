@@ -20,7 +20,7 @@ import net from 'node:net';
 // a domain they got a trusted employee to paste.
 const MAX_BYTES = 10 * 1024 * 1024; // 10MB - a page far larger than that is not a reasonable knowledge-base document
 const FETCH_TIMEOUT_MS = 15_000;
-const USER_AGENT = 'AskEvon-DocumentFetcher/1.0 (+internal knowledge base import)';
+const USER_AGENT = 'UKPCBAssistant-DocumentFetcher/1.0 (+internal knowledge base import)';
 
 export class UrlFetchError extends Error {}
 

@@ -1,8 +1,9 @@
-# Ask Evon
+# UKPCB Assistant
 
-A role-based enterprise AI knowledge assistant. Employees log in and ask an AI
-chatbot questions about the company; the AI only ever answers company
-questions from documents their role is cleared to see, and can still answer
+A role-based enterprise AI knowledge assistant for the Uttarakhand Pollution
+Control Board. Employees log in and ask an AI chatbot questions about the
+Board; the AI only ever answers Board questions from documents their role is
+cleared to see, and can still answer
 ordinary general questions (small talk, arithmetic, "what's the capital of
 France") normally instead of refusing everything. See the top of
 `prisma/schema.prisma` and the doc comments in `lib/db/queries/chunks.ts` /
@@ -46,9 +47,9 @@ npm install                      # also runs `prisma generate` (postinstall)
 cp .env.example .env             # fill in GEMINI_API_KEY
 npx auth secret                  # generates AUTH_SECRET into .env for you
 
-docker compose up -d             # starts Postgres + pgvector on :5433
+docker compose up -d             # starts Postgres + pgvector on :5434
 npm run db:migrate               # applies prisma/migrations/ (see note below)
-npm run db:seed                  # seeds the role hierarchy + one CXO account
+npm run db:seed                  # seeds the role hierarchy + one Member Secretary account
 
 npm run dev                      # http://localhost:3000
 ```
@@ -96,16 +97,16 @@ Subsequent schema changes only need `npm run db:migrate` as usual.
 ### The seeded account
 
 `npm run db:seed` deliberately seeds only the role hierarchy (configuration,
-not data) and one CXO admin account — no demo employees, no documents. Add
+not data) and one Member Secretary admin account — no demo employees, no documents. Add
 your own real employees and documents through the admin dashboard.
 
 | Email | Password | Role |
 |---|---|---|
-| `cxo@evon.com` | `Password123!` | CXO — admin dashboard + document upload |
+| `cxo@ukpcb.gov.in` | `Password123!` | Member Secretary — admin dashboard + document upload |
 
 ### Admin dashboard
 
-Log in as the CXO account and a profile menu (bottom-left of the sidebar)
+Log in as the Member Secretary account and a profile menu (bottom-left of the sidebar)
 gives access to:
 
 - **`/admin`** — overview stats (employees, documents, documents by
@@ -228,9 +229,9 @@ already the default.
 5. **Run migrations against the Neon database** before or right after the
    first deploy: `DATABASE_URL="<neon-url>" npx prisma migrate deploy` from
    your machine (not `migrate dev` — that's for local schema iteration).
-6. **Seed the role hierarchy + CXO account**:
+6. **Seed the role hierarchy + Member Secretary account**:
    `DATABASE_URL="<neon-url>" npm run db:seed`.
-7. Deploy. Log in as the seeded CXO account and upload real documents /
+7. Deploy. Log in as the seeded Member Secretary account and upload real documents /
    create employees through the admin dashboard, same as local dev.
 
 ## What's not built yet

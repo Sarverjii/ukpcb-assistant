@@ -7,4 +7,4 @@
 // — worst case (private browsing, a cleared/blocked store) it's just
 // absent and the back link falls back to the plain "/chat" draft, exactly
 // like before this existed.
-export const LAST_CONVERSATION_STORAGE_KEY = 'ask-evon:last-conversation-id';
+export const LAST_CONVERSATION_STORAGE_KEY = 'ukpcb-assistant:last-conversation-id';

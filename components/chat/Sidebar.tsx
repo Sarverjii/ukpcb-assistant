@@ -172,7 +172,7 @@ function RailContent({ onExpand }: { onExpand: () => void }) {
   return (
     <div className="flex w-14 flex-col items-center gap-3 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 py-3">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/logo-mark.svg" alt="Evon" className="h-5 w-auto" />
+      <img src="/logo.png" alt="UKPCB" className="h-5 w-auto" />
       <button
         type="button"
         onClick={onExpand}
@@ -237,8 +237,8 @@ function SidebarContent({
       <div className="flex items-center justify-between px-3 py-3">
         <span className="flex items-center gap-2 px-1">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-mark.svg" alt="" className="h-5 w-auto" />
-          <span className="text-sm font-semibold text-zinc-900 dark:text-white">Ask Evon</span>
+          <img src="/logo.png" alt="" className="h-5 w-auto" />
+          <span className="text-sm font-semibold text-zinc-900 dark:text-white">UKPCB Assistant</span>
         </span>
         <button
           type="button"

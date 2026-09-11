@@ -23,13 +23,13 @@ export default auth((req) => {
 });
 
 export const config = {
-  // Excludes Next internals, the auth API, the generated /icon.svg route,
+  // Excludes Next internals, the auth API, the generated /icon.png route,
   // and any public/ static asset by extension — without the extension
-  // exclusion, a request for e.g. /logo.svg while logged out gets caught
+  // exclusion, a request for e.g. /logo.png while logged out gets caught
   // by this same redirect-to-/login logic (returning login HTML instead of
   // the image), which is exactly what broke the login page's own logo.
   // Next's own proxy docs warn about this class of bug explicitly.
   matcher: [
-    '/((?!api/auth|_next/static|_next/image|favicon\\.ico|icon\\.svg|apple-icon|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!api/auth|_next/static|_next/image|favicon\\.ico|icon\\.png|apple-icon|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
   ],
 };

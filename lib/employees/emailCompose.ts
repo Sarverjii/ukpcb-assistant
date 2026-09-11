@@ -17,7 +17,7 @@ export type ComposedEmail = {
   body: string;
 };
 
-const SIGN_OFF = '\n\n— Ask Evon';
+const SIGN_OFF = '\n\n— UKPCB Assistant';
 
 export function composeWelcomeEmail(input: {
   name: string;
@@ -27,10 +27,10 @@ export function composeWelcomeEmail(input: {
 }): ComposedEmail {
   return {
     to: input.email,
-    subject: 'Your Ask Evon account has been created',
+    subject: 'Your UKPCB Assistant account has been created',
     body:
       `Hi ${input.name},\n\n` +
-      `An Ask Evon account has been created for you at ${input.roleName} clearance.\n\n` +
+      `A UKPCB Assistant account has been created for you at ${input.roleName} clearance.\n\n` +
       `Email: ${input.email}\n` +
       `Temporary password: ${input.tempPassword}\n\n` +
       `Please sign in and change this password as soon as possible.` +
@@ -41,10 +41,10 @@ export function composeWelcomeEmail(input: {
 export function composePasswordResetEmail(input: { name: string; email: string; tempPassword: string }): ComposedEmail {
   return {
     to: input.email,
-    subject: 'Your Ask Evon password has been reset',
+    subject: 'Your UKPCB Assistant password has been reset',
     body:
       `Hi ${input.name},\n\n` +
-      `An administrator has reset your Ask Evon password.\n\n` +
+      `An administrator has reset your UKPCB Assistant password.\n\n` +
       `Email: ${input.email}\n` +
       `New temporary password: ${input.tempPassword}\n\n` +
       `Please sign in and change this password as soon as possible. If you did not expect this, ` +
@@ -61,13 +61,13 @@ export function composeAccountStatusEmail(input: {
   const isDisabled = input.newStatus === 'DISABLED';
   return {
     to: input.email,
-    subject: isDisabled ? 'Your Ask Evon account has been disabled' : 'Your Ask Evon account has been re-enabled',
+    subject: isDisabled ? 'Your UKPCB Assistant account has been disabled' : 'Your UKPCB Assistant account has been re-enabled',
     body:
       `Hi ${input.name},\n\n` +
       (isDisabled
-        ? `Your Ask Evon account has been disabled by an administrator. You will not be able to sign in ` +
+        ? `Your UKPCB Assistant account has been disabled by an administrator. You will not be able to sign in ` +
           `until it is re-enabled.`
-        : `Your Ask Evon account has been re-enabled by an administrator. You can sign in as usual.`) +
+        : `Your UKPCB Assistant account has been re-enabled by an administrator. You can sign in as usual.`) +
       SIGN_OFF,
   };
 }

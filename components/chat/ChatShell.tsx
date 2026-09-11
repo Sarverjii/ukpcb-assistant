@@ -59,7 +59,7 @@ export function ChatShell({
           >
             <Menu size={18} />
           </button>
-          <span className="text-sm font-semibold text-zinc-900 dark:text-white">Ask Evon</span>
+          <span className="text-sm font-semibold text-zinc-900 dark:text-white">UKPCB Assistant</span>
         </div>
 
         {anyOffline && (
@@ -67,7 +67,7 @@ export function ChatShell({
             <span className="flex items-center gap-2">
               <ShieldAlert size={16} className="shrink-0" />
               {providerOffline.llm
-                ? "Ask Evon isn't answering questions right now — no AI model is configured."
+                ? "UKPCB Assistant isn't answering questions right now — no AI model is configured."
                 : "Document search isn't working right now — no embedding model is configured."}{' '}
               {isAdmin ? 'Fix this in AI Models.' : 'An administrator needs to fix this.'}
             </span>

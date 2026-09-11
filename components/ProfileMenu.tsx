@@ -80,7 +80,7 @@ export function ProfileMenu({
           onClick={close}
           className="flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
         >
-          <Library size={15} /> Evon Knowledge Base
+          <Library size={15} /> UKPCB Knowledge Base
         </Link>
       )}
       <Link
@@ -95,7 +95,7 @@ export function ProfileMenu({
         onClick={close}
         className="flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
       >
-        <Users size={15} /> Evon Directory
+        <Users size={15} /> UKPCB Directory
       </Link>
       <Link
         href="/settings"

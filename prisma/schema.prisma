@@ -1,4 +1,4 @@
-// Ask Evon — database schema
+// UKPCB Assistant — database schema
 //
 // Security note: `DocumentChunk.clearanceRank` is deliberately denormalized
 // from `Document.clearanceLevel` at write time. Every retrieval query filters
@@ -216,7 +216,7 @@ model EmployeeImportBatch {
 model Department {
   id                String   @id @default(cuid())
   name              String   @unique
-  // Short blurb shown on the Departments admin page and the Evon
+  // Short blurb shown on the Departments admin page and the UKPCB
   // Directory — purely descriptive, never authorization-relevant.
   description       String?
   // A "head department" (the user's own term) sees every document tagged
@@ -236,7 +236,7 @@ model Department {
   // capability or clearance boost of any kind (a head has exactly the
   // access their own Role and department memberships already grant, same
   // as any other member). Purely an org-chart label surfaced on both the
-  // Departments admin page and the Evon Directory. SetNull if that
+  // Departments admin page and the UKPCB Directory. SetNull if that
   // employee is later hard-deleted, mirroring every other "survives with
   // a cleared reference" pattern in this schema.
   headUserId        String?

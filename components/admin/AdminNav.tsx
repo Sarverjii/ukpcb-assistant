@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 import { LayoutDashboard, Users, Building2, Network, ScrollText, Cpu, Gauge, ChevronDown, Check } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
-// Document management lives in the Evon Knowledge Base now (see
+// Document management lives in the UKPCB Knowledge Base now (see
 // app/(app)/knowledge-base) — reachable by any role granted upload
 // rights, not just admins, so it's deliberately not one of these tabs.
 // What's left here (Overview, Employees, Departments, Hierarchy, Audit

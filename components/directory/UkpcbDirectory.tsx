@@ -12,7 +12,7 @@ export type DirectoryPerson = {
 };
 
 /**
- * The Evon Directory — a company-wide "who's who," visible to every
+ * The UKPCB Directory — a Board-wide "who's who," visible to every
  * employee (see the page's own gating comment). Two modes, switched
  * purely by whether the search box has anything in it:
  *
@@ -23,7 +23,7 @@ export type DirectoryPerson = {
  *    removed per explicit feedback that browsing should start from the
  *    full department list, not the viewer's own membership).
  *  - Non-empty search: a flat, ranked list of every matching person
- *    across the whole company (name, email, or department), regardless
+ *    across the whole Board (name, email, or department), regardless
  *    of department — the fast path once you know roughly who you're
  *    looking for.
  *
@@ -32,7 +32,7 @@ export type DirectoryPerson = {
  * to low hundreds, filter in memory" reasoning this app already applies
  * to the Employees and Documents tables).
  */
-export function EvonDirectory({
+export function UkpcbDirectory({
   people,
   departmentHeads,
   viewerId,

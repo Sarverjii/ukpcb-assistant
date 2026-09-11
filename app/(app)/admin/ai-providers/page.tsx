@@ -54,7 +54,7 @@ export default async function AIProvidersPage() {
         <div className="flex items-start gap-2.5 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/40 p-4 text-sm text-red-700 dark:text-red-400">
           <ShieldAlert size={18} className="mt-0.5 shrink-0" />
           <p>
-            No {missing.join(' and ')} provider is active. Ask Evon cannot{' '}
+            No {missing.join(' and ')} provider is active. UKPCB Assistant cannot{' '}
             {missing.includes('chat/query') && 'answer chat questions'}
             {missing.length === 2 && ' or '}
             {missing.includes('embedding') && 'process/search documents'} until one is set up below —
