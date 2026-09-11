@@ -10,23 +10,27 @@ import { insertDocumentChunks } from '../lib/db/queries/chunks';
 /**
  * Shared by prisma/seed.ts (local dev data) and tests/authz.test.ts (the
  * authorization test suite) so both exercise the exact same fixture shape.
- * Roles, users, and documents here are deliberately the ones referenced in
- * the spec's own worked examples (see project spec §29-30).
+ * Role names reflect a state Pollution Control Board's own org structure
+ * (Member Secretary is the Board's real chief-executive/administrative
+ * post — see README.md); the six-rank shape and every downstream
+ * clearance/department mechanic these fixtures exercise is otherwise
+ * unchanged from the original corporate-themed version this was ported
+ * from — only the names moved, not what each rank grants.
  */
 export const ROLE_DEFS = [
-  { name: 'CXO', hierarchyRank: 6, canUploadDocuments: true, isAdmin: true },
-  { name: 'President', hierarchyRank: 5, canUploadDocuments: false, isAdmin: false },
-  { name: 'VP', hierarchyRank: 4, canUploadDocuments: false, isAdmin: false },
-  { name: 'Architect', hierarchyRank: 3, canUploadDocuments: false, isAdmin: false },
-  { name: 'HR', hierarchyRank: 2, canUploadDocuments: false, isAdmin: false },
-  { name: 'Software Engineer', hierarchyRank: 1, canUploadDocuments: false, isAdmin: false },
+  { name: 'Member Secretary', hierarchyRank: 6, canUploadDocuments: true, isAdmin: true },
+  { name: 'Additional Director', hierarchyRank: 5, canUploadDocuments: false, isAdmin: false },
+  { name: 'Regional Officer', hierarchyRank: 4, canUploadDocuments: false, isAdmin: false },
+  { name: 'Scientific Officer', hierarchyRank: 3, canUploadDocuments: false, isAdmin: false },
+  { name: 'Administrative Officer', hierarchyRank: 2, canUploadDocuments: false, isAdmin: false },
+  { name: 'Junior Engineer', hierarchyRank: 1, canUploadDocuments: false, isAdmin: false },
 ] as const;
 
 export const TEST_USERS = [
-  { email: 'engineer@asktest.local', name: 'Erin Engineer', roleName: 'Software Engineer' },
-  { email: 'hr@asktest.local', name: 'Hana HR', roleName: 'HR' },
-  { email: 'architect@asktest.local', name: 'Aidan Architect', roleName: 'Architect' },
-  { email: 'cxo@asktest.local', name: 'Cara CXO', roleName: 'CXO' },
+  { email: 'engineer@asktest.local', name: 'Erin Engineer', roleName: 'Junior Engineer' },
+  { email: 'hr@asktest.local', name: 'Hana HR', roleName: 'Administrative Officer' },
+  { email: 'architect@asktest.local', name: 'Aidan Architect', roleName: 'Scientific Officer' },
+  { email: 'cxo@asktest.local', name: 'Cara CXO', roleName: 'Member Secretary' },
 ] as const;
 
 export const TEST_PASSWORD = 'Password123!';
@@ -34,7 +38,7 @@ export const TEST_PASSWORD = 'Password123!';
 const FIXTURE_DOCS = [
   {
     name: 'Engineering Handbook',
-    roleName: 'Software Engineer',
+    roleName: 'Junior Engineer',
     content:
       'The engineering team follows a weekly on-call rotation. Every engineer is on-call ' +
       'for one week per quarter, and incidents are tracked in the incident management system. ' +
@@ -42,7 +46,7 @@ const FIXTURE_DOCS = [
   },
   {
     name: 'HR Compensation Bands',
-    roleName: 'HR',
+    roleName: 'Administrative Officer',
     content:
       'Compensation bands for engineering roles range from Band 3 to Band 7. Salary bands are ' +
       'reviewed annually by the compensation committee. Band 5 engineers have a base salary ' +
@@ -52,7 +56,7 @@ const FIXTURE_DOCS = [
   },
   {
     name: 'Board Merger Plans',
-    roleName: 'CXO',
+    roleName: 'Member Secretary',
     content:
       'The board has approved preliminary due diligence on the acquisition of Northwind Corp, ' +
       'targeted to close in Q3. This information is strictly confidential and has not been ' +
@@ -74,6 +78,24 @@ export async function seedRoles() {
   }
 }
 
+// Every employee and every document created THROUGH THE REAL APP must now
+// belong to at least one department (see lib/db/queries/departments.ts's
+// requireNonEmptyDepartments) — but these fixtures deliberately stay
+// departmentless, and deliberately keep bypassing that policy, same as
+// they already bypass every other action-layer check (requireAdmin,
+// requireCanUploadDocuments, etc.) by writing rows directly with Prisma.
+// That's intentional here specifically: this suite exists to prove the
+// PURE clearance-rank boundary in isolation (see authContextFor's own
+// comment in tests/authz.test.ts, and the many call sites there that pass
+// `[]`/`false` for department/head-access explicitly, independent of
+// whatever the real DB user record has) — giving these fixtures a real
+// department would make department membership start gating those
+// clearance-only assertions too, which is exactly what they're designed
+// not to test (department-vs-clearance interaction has its own dedicated
+// test group, using its own temporary departments, further down that
+// file). Never reachable from the real app either way: prisma/seed.ts
+// calls seedRoles() only, never this function, so no departmentless row
+// from here ever lands in a real, UI-facing database.
 export async function seedTestUsers() {
   const passwordHash = await hashPassword(TEST_PASSWORD);
   for (const u of TEST_USERS) {

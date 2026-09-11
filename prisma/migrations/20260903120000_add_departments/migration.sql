@@ -94,14 +94,23 @@ ALTER TABLE "User" ADD CONSTRAINT "User_importBatchId_fkey"
 -- security note in schema.prisma) — same pattern as clearanceRank.
 ALTER TABLE "DocumentChunk" ADD COLUMN "departmentIds" TEXT[] DEFAULT ARRAY[]::TEXT[];
 
--- Seed the canonical department list, grounded in the free-text values
--- already in real use across this app's documents/employees.
+-- Seed the canonical department list. Renamed from the original
+-- corporate set (Engineering/HR/Sales & Business Development/Operations/
+-- QA) to a Pollution Control Board's own wings — Consent Management in
+-- particular replaces "Sales & Business Development" because issuing
+-- Consent to Establish/Operate is this kind of board's actual core
+-- regulatory function, not a corporate-sales analog. Finance & Accounts
+-- and Executive are generic enough to apply unchanged to either kind of
+-- org, so those two are untouched. This still only matters for a
+-- genuinely fresh database — see the backfill note below, which no-ops
+-- here regardless of these names since there's no pre-existing free-text
+-- department data in this project's own history to match against.
 INSERT INTO "Department" ("id", "name", "createdAt") VALUES
-  (gen_random_uuid()::text, 'Engineering', now()),
-  (gen_random_uuid()::text, 'HR', now()),
-  (gen_random_uuid()::text, 'Sales & Business Development', now()),
-  (gen_random_uuid()::text, 'Operations', now()),
-  (gen_random_uuid()::text, 'QA', now()),
+  (gen_random_uuid()::text, 'Environmental Engineering', now()),
+  (gen_random_uuid()::text, 'Administration', now()),
+  (gen_random_uuid()::text, 'Consent Management', now()),
+  (gen_random_uuid()::text, 'Field Operations', now()),
+  (gen_random_uuid()::text, 'Laboratory', now()),
   (gen_random_uuid()::text, 'Finance & Accounts', now()),
   (gen_random_uuid()::text, 'Executive', now());
 
