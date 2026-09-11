@@ -1,0 +1,13 @@
+{
+  "name": "ukpcb-bulk-upload",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone script that bulk-uploads every document in ./Documents to the UKPCB Assistant knowledge base, skipping anything already uploaded. Not part of the main UKPCB Assistant app — run npm install once in this folder before first use.",
+  "type": "module",
+  "scripts": {
+    "upload": "node upload-documents.mjs"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.8.0"
+  }
+}
