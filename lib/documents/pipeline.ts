@@ -23,8 +23,18 @@ const PDF_MIME = 'application/pdf';
 // all) rather than as a real, if unusually short, text page — confirmed
 // directly against four real scanned PDFs (all under 10 characters total
 // across every page) and against normal text pages in this app's existing
-// corpus, which run into the hundreds of characters at minimum.
-const SCANNED_PAGE_TEXT_THRESHOLD = 20;
+// corpus, which run into the hundreds of characters at minimum. Originally
+// 20, which was one character too low: CamScanner (a very common scanning
+// app) stamps every page it produces with the 21-character watermark
+// "Scanned by CamScanner" as that page's ONLY real text layer — a document
+// scanned with it therefore has real, non-whitespace "text" on every page
+// but is still 100% image, and at threshold 20 it narrowly cleared the
+// bar and was never OCR'd at all (confirmed directly against a real
+// CamScanner-scanned document uploaded to this app, whose chunks were
+// nothing but that watermark string, repeated). Raised well clear of
+// that specific 21-character case while staying far below the
+// "hundreds of characters" a real text page has.
+const SCANNED_PAGE_TEXT_THRESHOLD = 40;
 
 // Sent verbatim as the vision-model prompt for every OCR'd page, on every
 // provider — confirmed directly against a real scanned page (Gemini
