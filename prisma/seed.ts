@@ -12,7 +12,7 @@
 import dotenv from 'dotenv';
 dotenv.config({ quiet: true });
 
-const ADMIN_EMAIL = 'cxo@ukpcb.gov.in';
+const ADMIN_EMAIL = 'admin@ukpcb.gov.in';
 const ADMIN_PASSWORD = 'Password123!';
 
 // Deliberately seeds ONLY the role hierarchy (organizational configuration)

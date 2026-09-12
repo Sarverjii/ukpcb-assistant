@@ -146,7 +146,7 @@ demo employees or documents:
 
 | Email | Password | Role |
 |---|---|---|
-| `cxo@ukpcb.gov.in` | `Password123!` | Member Secretary — full admin dashboard + document upload |
+| `admin@ukpcb.gov.in` | `Password123!` | Member Secretary — full admin dashboard + document upload |
 
 **Change this password (or the seed script itself) before this ever goes
 anywhere someone else can reach it.** It's a known, documented default —

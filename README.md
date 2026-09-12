@@ -102,7 +102,7 @@ your own real employees and documents through the admin dashboard.
 
 | Email | Password | Role |
 |---|---|---|
-| `cxo@ukpcb.gov.in` | `Password123!` | Member Secretary — admin dashboard + document upload |
+| `admin@ukpcb.gov.in` | `Password123!` | Member Secretary — admin dashboard + document upload |
 
 ### Admin dashboard
 

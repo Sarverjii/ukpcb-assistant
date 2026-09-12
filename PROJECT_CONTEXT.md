@@ -17,7 +17,7 @@ carried out: this app now targets the Uttarakhand Pollution Control Board
   the brand accent color scale in `app/globals.css` was regenerated from
   that seal's green (`#3b7f51`) instead of the old navy.
 - The seeded admin account's placeholder email moved from `cxo@evon.com`
-  to `cxo@ukpcb.gov.in`; the `package.json` name is now `ukpcb-assistant`;
+  to `admin@ukpcb.gov.in`; the `package.json` name is now `ukpcb-assistant`;
   local dev's Postgres (`docker-compose.yml`, `.env.example`) moved from
   `evon`/`ask_evon` naming to `ukpcb`.
 - A couple of historical engineering comments (`lib/rag/chat.ts`,
@@ -49,7 +49,7 @@ real title of a State Pollution Control Board's chief executive/
 administrative officer in India (the Chairman role is more ceremonial/
 political), so it's the authentic fit for the one role that gets
 `isAdmin`/`canUploadDocuments`. The seeded admin account
-(`cxo@ukpcb.gov.in`) now holds this role; `prisma/seed.ts` was updated to
+(`admin@ukpcb.gov.in`) now holds this role; `prisma/seed.ts` was updated to
 look it up by its new name.
 
 **What did NOT change, on purpose**: `TEST_USERS`' email addresses/names
