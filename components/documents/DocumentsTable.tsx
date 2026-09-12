@@ -8,13 +8,15 @@ import {
   deleteDocumentAction,
   replaceDocumentAction,
   finalizeReplaceDocumentAction,
+  retryDocumentAction,
 } from '@/app/(app)/knowledge-base/actions';
-import { Link2, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { Link2, ChevronUp, ChevronDown, ChevronsUpDown, RotateCw } from 'lucide-react';
 import { LocalTime } from '@/components/admin/LocalTime';
 import { ACCEPTED_EXTENSIONS } from '@/lib/documents/uploadClient';
 import { DepartmentCheckboxList } from '@/components/shared/DepartmentCheckboxList';
 import { ClearanceLevelPicker } from '@/components/shared/ClearanceLevelPicker';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
+import { isRateLimitError } from '@/lib/ai/errors';
 
 export type DocumentRow = {
   id: string;
@@ -32,6 +34,11 @@ export type DocumentRow = {
   // schema comment. Both null for every ordinary document.
   ocrPagesTotal: number | null;
   ocrPagesDone: number | null;
+  // Null unless status is FAILED — the raw message setDocumentStatus
+  // recorded. Checked against isRateLimitError (lib/ai/errors.ts) to
+  // decide whether this row's Retry button gets the "provider rate
+  // limit" framing or a generic one.
+  processingError: string | null;
 };
 type Role = { hierarchyRank: number; name: string };
 
@@ -311,6 +318,14 @@ function DocumentRow({
     fileInputRef.current?.click();
   }
 
+  function handleRetry() {
+    setError(null);
+    startTransition(async () => {
+      const result = await retryDocumentAction(doc.id);
+      if (result.error) setError(result.error);
+    });
+  }
+
   async function replaceViaBlob(file: File): Promise<{ error?: string }> {
     const ext = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '';
     const pathname = `documents/${crypto.randomUUID()}${ext}`;
@@ -379,6 +394,20 @@ function DocumentRow({
       </td>
       <td className="px-3 py-2">
         <StatusPill status={doc.status} ocrPagesTotal={doc.ocrPagesTotal} ocrPagesDone={doc.ocrPagesDone} />
+        {doc.status === 'FAILED' && doc.processingError && (
+          <p
+            className={`mt-1 max-w-[16rem] text-xs ${
+              isRateLimitError(doc.processingError)
+                ? 'text-amber-600 dark:text-amber-500'
+                : 'text-zinc-400 dark:text-zinc-500'
+            }`}
+            title={doc.processingError}
+          >
+            {isRateLimitError(doc.processingError)
+              ? 'The AI provider hit its rate/usage limit.'
+              : doc.processingError}
+          </p>
+        )}
       </td>
       <td className="px-3 py-2 whitespace-nowrap text-zinc-500">
         <LocalTime iso={doc.updatedAt} />
@@ -406,6 +435,17 @@ function DocumentRow({
             className="hidden"
             onChange={handleFileSelected}
           />
+          {doc.status === 'FAILED' && (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={handleRetry}
+              className="flex items-center gap-1 rounded-md border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-50"
+            >
+              <RotateCw size={11} />
+              Retry
+            </button>
+          )}
           <button
             type="button"
             disabled={pending}

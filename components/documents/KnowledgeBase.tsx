@@ -1,14 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, Files, Globe } from 'lucide-react';
+import Link from 'next/link';
+import { Upload, Files, Globe, AlertTriangle, RotateCw } from 'lucide-react';
 import { UploadForm } from '@/components/documents/UploadForm';
 import { UrlUploadForm } from '@/components/documents/UrlUploadForm';
 import { WebsiteGroups } from '@/components/documents/WebsiteGroups';
 import { DocumentsTable, type DocumentRow } from '@/components/documents/DocumentsTable';
 import { useUploadQueue } from '@/components/documents/UploadQueueContext';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
+import { isRateLimitError } from '@/lib/ai/errors';
+import { retryDocumentAction } from '@/app/(app)/knowledge-base/actions';
 
 type Role = { hierarchyRank: number; name: string };
 type TabId = 'upload' | 'documents' | 'websites';
@@ -43,12 +46,14 @@ type TabId = 'upload' | 'documents' | 'websites';
  * and a real upload never shows up under Websites.
  */
 export function KnowledgeBase({
+  isAdmin,
   roles,
   documents,
   departments,
   useClientUpload,
   uploadMaxMb,
 }: {
+  isAdmin: boolean;
   roles: Role[];
   documents: DocumentRow[];
   departments: PickableDepartment[];
@@ -60,6 +65,25 @@ export function KnowledgeBase({
   const [singleUploading, setSingleUploading] = useState(false);
   const uploading = queue.isRunning || singleUploading;
   const [tab, setTab] = useState<TabId>('upload');
+  const [retryingAll, startRetryAll] = useTransition();
+
+  // Surfaced the same way a missing AI provider is (ChatShell's red
+  // banner) rather than making an admin notice on their own that a batch
+  // of uploads quietly stopped partway through — the single most likely
+  // reason several documents in a row all end up FAILED together (see
+  // isRateLimitError's own comment). Computed from the same `documents`
+  // prop the table already has, so no extra fetch.
+  const rateLimitedFailed = useMemo(
+    () => documents.filter((d) => d.status === 'FAILED' && isRateLimitError(d.processingError)),
+    [documents],
+  );
+
+  function handleRetryAll() {
+    startRetryAll(async () => {
+      await Promise.all(rateLimitedFailed.map((d) => retryDocumentAction(d.id)));
+      router.refresh();
+    });
+  }
 
   const { fileDocuments, websiteDocuments } = useMemo(() => {
     const files: DocumentRow[] = [];
@@ -105,6 +129,41 @@ export function KnowledgeBase({
 
   return (
     <div className="flex flex-col gap-6">
+      {rateLimitedFailed.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-4 py-2.5 text-sm text-amber-800 dark:text-amber-400">
+          <span className="flex items-center gap-2">
+            <AlertTriangle size={16} className="shrink-0" />
+            {rateLimitedFailed.length === 1
+              ? '1 document stopped processing — the AI provider hit its rate/usage limit.'
+              : `${rateLimitedFailed.length} documents stopped processing — the AI provider hit its rate/usage limit.`}{' '}
+            {isAdmin
+              ? 'Switch to a fresh API key in AI Models, then retry — it resumes from where each one left off, not from scratch.'
+              : 'An administrator needs to switch to a fresh API key before these can finish.'}
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            {isAdmin && (
+              <Link
+                href="/admin/ai-providers"
+                className="rounded-md border border-amber-300 dark:border-amber-800 px-2.5 py-1 text-xs font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40"
+              >
+                Open AI Models
+              </Link>
+            )}
+            <button
+              type="button"
+              onClick={handleRetryAll}
+              disabled={retryingAll}
+              className="flex items-center gap-1.5 rounded-md border border-amber-300 dark:border-amber-800 px-2.5 py-1 text-xs font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40 disabled:opacity-50"
+            >
+              <RotateCw size={12} className={retryingAll ? 'animate-spin' : ''} />
+              {retryingAll
+                ? 'Retrying…'
+                : `Retry ${rateLimitedFailed.length === 1 ? 'it' : `all ${rateLimitedFailed.length}`} now`}
+            </button>
+          </span>
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-3">
         <nav className="flex flex-wrap gap-1 border-b border-zinc-200 dark:border-zinc-800">
           {tabs.map((t) => {

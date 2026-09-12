@@ -59,6 +59,7 @@ export default async function KnowledgeBasePage() {
       </p>
       <div className="mt-6">
         <KnowledgeBase
+          isAdmin={ctx.isAdmin}
           roles={availableRoles.map((r) => ({ hierarchyRank: r.hierarchyRank, name: r.name }))}
           departments={departments.map((d) => ({ id: d.id, name: d.name }))}
           documents={documents.map((d) => ({
@@ -76,6 +77,7 @@ export default async function KnowledgeBasePage() {
             sourceUrl: d.sourceUrl,
             ocrPagesTotal: d.ocrPagesTotal,
             ocrPagesDone: d.ocrPagesDone,
+            processingError: d.processingError,
           }))}
           useClientUpload={config.STORAGE_PROVIDER === 'vercel-blob'}
           uploadMaxMb={config.UPLOAD_MAX_MB}

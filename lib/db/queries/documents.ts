@@ -59,6 +59,27 @@ export function setDocumentStatus(id: string, status: DocumentStatus, processing
 }
 
 /**
+ * Puts a FAILED document back to PENDING with its error cleared — the
+ * "Retry" action (app/(app)/knowledge-base/actions.ts's retryDocumentAction)
+ * uses this rather than anything that touches fileKey/mimeType, since
+ * nothing about the underlying file changed; only its processing outcome
+ * did. Deliberately does NOT reset ocrPagesTotal/ocrPagesDone or delete
+ * any chunks already inserted: processDocument() re-derives both from the
+ * real DocumentChunk rows and a fresh PDF parse every time it runs (see
+ * its own module comment), so a retry correctly RESUMES from whatever
+ * pages/content already made it in rather than redoing them — the same
+ * behavior that already makes a stalled OCR pass resumable, just reached
+ * from a FAILED document instead of a PROCESSING one that ran out of its
+ * pass budget.
+ */
+export function resetDocumentForRetry(id: string) {
+  return prisma.document.update({
+    where: { id },
+    data: { status: 'PENDING', processingError: null },
+  });
+}
+
+/**
  * Records (or clears) the storage key of the generated preview PDF — see
  * previewFileKey's doc comment in prisma/schema.prisma. Called once per
  * processing pass (lib/documents/pipeline.ts), always with the outcome of

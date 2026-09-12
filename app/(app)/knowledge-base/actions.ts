@@ -13,6 +13,7 @@ import {
   deleteDocument as deleteDocumentRow,
   updateDocumentFile,
   listIngestedSourceUrls,
+  resetDocumentForRetry,
 } from '@/lib/db/queries/documents';
 import { listDepartments, requireNonEmptyDepartments } from '@/lib/db/queries/departments';
 import {
@@ -258,6 +259,47 @@ export async function finalizeReplaceDocumentAction(
   after(() =>
     processDocument(documentId).catch((err) => {
       console.error('[documents] reprocessing failed', documentId, err);
+    }),
+  );
+
+  revalidatePath(KNOWLEDGE_BASE_PATH);
+  return {};
+}
+
+/**
+ * Re-attempts processing for a document currently stuck at FAILED —
+ * common cause: the active embedding/LLM provider hit its rate limit or
+ * free-tier quota partway through a batch of uploads (see
+ * lib/ai/errors.ts's isRateLimitError, which the Knowledge Base UI uses
+ * to spot this pattern and surface a banner pointing here). No new file
+ * involved, unlike Replace — resetDocumentForRetry just clears the error
+ * and puts the SAME document back to PENDING, then this re-invokes the
+ * real pipeline exactly as the original upload did. Safe to call on any
+ * FAILED document regardless of why it failed (a genuine, non-transient
+ * failure just fails the same way again, harmlessly) and correctly
+ * RESUMES rather than restarts a partially-OCR'd scan — see
+ * resetDocumentForRetry's own comment for why nothing about the chunks
+ * or OCR progress already recorded needs to be touched here.
+ */
+export async function retryDocumentAction(documentId: string): Promise<ActionResult> {
+  const ctx = await getAuthContext();
+  const doc = await getDocument(documentId);
+  try {
+    await requireCanManageDocument(ctx, doc.clearanceLevel);
+  } catch (err) {
+    if (err instanceof ForbiddenError) return { error: err.message };
+    throw err;
+  }
+
+  if (doc.status !== 'FAILED') {
+    return { error: 'This document is not in a failed state.' };
+  }
+
+  await resetDocumentForRetry(documentId);
+
+  after(() =>
+    processDocument(documentId).catch((err) => {
+      console.error('[documents] retry failed', documentId, err);
     }),
   );
 

@@ -205,6 +205,21 @@ that needs a real browser session.
       picker is receiving a clearance value that doesn't exactly match a
       real `Role.hierarchyRank` — a regression of a real bug found and
       fixed this session.
+- [ ] **Rate-limited provider mid-batch**: upload several documents in a
+      row against a provider close to its free-tier quota until at least
+      one lands on FAILED with a rate-limit-shaped error (Gemini's
+      `RESOURCE_EXHAUSTED` 429, or force it by pointing at an exhausted
+      key) → the amber banner at the top of Knowledge Base appears,
+      naming how many documents are affected, with "Open AI Models" (admin
+      only) and "Retry" buttons. Switch to a working API key in AI Models,
+      click Retry → the SAME document(s) finish processing rather than
+      erroring again. For a scanned PDF that failed partway through OCR
+      (some pages already transcribed), confirm the retry **resumes**
+      (`ocrPagesDone` picks up where it left off, no duplicate chunks for
+      an already-OCR'd page) rather than restarting the scan from page 1.
+      A non-rate-limit failure (e.g. a genuinely corrupt file) should NOT
+      trigger this banner — only the per-row "Retry" button, with the
+      real error message shown, not the rate-limit framing.
 
 ## 6. Document Library (employee-facing, `/documents`)
 
