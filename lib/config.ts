@@ -56,4 +56,26 @@ const envSchema = z.object({
   AI_CREDENTIALS_ENCRYPTION_KEY: z.string().optional(),
 });
 
-export const config = envSchema.parse(process.env);
+// Vercel's own env var UI does NOT treat "leave the value blank" as "don't
+// set this variable" — a variable listed with an empty value still reaches
+// process.env as the literal empty string "", not undefined. That silently
+// broke every optional/defaulted field above: z.coerce.number() coerces ""
+// to 0 (JS's own Number("") === 0), which then fails .positive() with a
+// confusing "Too small: expected number to be >0" — confirmed directly,
+// this is exactly what happened deploying this project to Vercel the first
+// time, on EMBEDDING_DIMENSIONS and UPLOAD_MAX_MB both, deleting neither
+// var (as Vercel's UI made it look required, since it was pre-listed from
+// .env.example) fixed it, just leaving their values blank. Normalizing
+// every blank env var to undefined here, once, before the schema ever sees
+// it, means "" and "genuinely absent" are indistinguishable from this
+// point on — so `.default(...)` and `.optional()` behave the same
+// regardless of which one a given deployment platform's UI actually does.
+function blankToUndefined(env: NodeJS.ProcessEnv): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(env)) {
+    out[key] = value === '' ? undefined : value;
+  }
+  return out;
+}
+
+export const config = envSchema.parse(blankToUndefined(process.env));
