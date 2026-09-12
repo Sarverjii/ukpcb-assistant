@@ -24,8 +24,21 @@ import type { EmbeddingProvider, EmbeddingTaskType } from '@/lib/embeddings/type
 // Gemini's outputDimensionality parameter, never left to the model's own
 // native size.
 
-// Batching keeps request count down (Gemini's free-tier rate limits are
-// per-request, not per-text) without risking an oversized single payload.
+// Batching keeps the number of HTTP calls down and stays well clear of any
+// per-request payload ceiling — but does NOT, on its own, protect against
+// the free-tier rate limit, which was confirmed directly (a controlled
+// test against the real API: five successive batches of 20 texts each
+// succeeded — 100 texts total — and the sixth batch, which would have
+// brought the running total to 120, failed with a 429) to be counted per
+// EMBEDDED TEXT, not per HTTP call, despite Google's own quota metric
+// being named "...Requests..." (generativelanguage.googleapis.com/
+// embed_content_free_tier_requests, quotaValue "100", PerMinute). A single
+// large document (a real 145-page PDF, ~700+ chunks after splitting) was
+// confirmed to hit this instantly and permanently on every retry — ~35
+// batches of 20 fired back-to-back blows through 100 texts/minute in the
+// first handful of batches no matter how many times it's retried or which
+// key is used, since the problem is the document's size against this
+// ceiling, not the key. See BATCH_MIN_INTERVAL_MS below for the fix.
 const BATCH_SIZE = 20;
 const MAX_ATTEMPTS = 3;
 // 429 rate-limited, 500 internal error, 503 "currently experiencing high
@@ -39,22 +52,23 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+// Paces successive BATCHED calls (the normal, default path — see embed()
+// below) so a large document's total embedded-text count stays under the
+// free tier's 100/minute ceiling instead of blowing through it in the
+// first few batches. At BATCH_SIZE 20, four batches a minute is 80
+// texts/minute — real headroom below 100 for the same reason
+// FALLBACK_MIN_INTERVAL_MS below leaves headroom: concurrent production
+// traffic (live chat, a different document's own processing) shares the
+// same per-minute ceiling and isn't paused during a bulk re-embed.
+const BATCH_MIN_INTERVAL_MS = 15_000;
+
 // The per-text fallback path (see embedBatchWithFallback) issues one
-// embedContent call per text instead of one per batch — confirmed
-// directly against the real API's own error response that this quota is
-// exactly 100 requests/minute, PER MODEL, on Gemini's free tier
-// (generativelanguage.googleapis.com/embed_content_free_tier_requests,
-// quotaValue "100", model gemini-embedding-2). An unbounded burst blew
-// through that instantly (a batch of 40-100 concurrent calls), and since
-// embedContentWithRetry's own backoff-retry runs inside that same burst,
-// the retries collided with the still-exceeded quota and failed too —
-// exponential backoff over ~4.5s total doesn't help against a per-minute
-// ceiling that needs 8+ seconds to reset. Pacing to one call every 700ms
-// (~85/min) stays under that ceiling with real headroom left over for
-// concurrent production traffic on the same key (live chat/document
-// embedding requests aren't paused during a bulk re-embed) — slower than
-// a real batch call, but the only way this path actually completes
-// instead of failing partway through every time.
+// embedContent call per text instead of one per batch, for a model whose
+// batched response silently doesn't match what was sent — pacing that at
+// one call every 700ms (~85/min) stays under the same per-text ceiling
+// documented above, with the same kind of headroom BATCH_MIN_INTERVAL_MS
+// leaves — slower than a real batch call, but the only way this path
+// actually completes instead of failing partway through every time.
 const FALLBACK_MIN_INTERVAL_MS = 700;
 
 function sleep(ms: number): Promise<void> {
@@ -81,9 +95,13 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
   async embed(texts: string[], taskType: EmbeddingTaskType = 'RETRIEVAL_DOCUMENT'): Promise<number[][]> {
     if (texts.length === 0) return [];
 
+    const batches = chunkArray(texts, BATCH_SIZE);
     const results: number[][] = [];
-    for (const batch of chunkArray(texts, BATCH_SIZE)) {
-      const vectors = await this.embedBatchWithFallback(batch, taskType);
+    for (let i = 0; i < batches.length; i++) {
+      // No wait before the first batch — pacing only matters BETWEEN
+      // calls; a single-batch document (the common case) is unaffected.
+      if (i > 0) await sleep(BATCH_MIN_INTERVAL_MS);
+      const vectors = await this.embedBatchWithFallback(batches[i], taskType);
       results.push(...vectors);
     }
     return results;

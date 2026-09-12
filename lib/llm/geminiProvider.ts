@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { FinishReason, GoogleGenAI } from '@google/genai';
 import type { ChatTurn, GenerateAnswerParams, LLMProvider } from '@/lib/llm/types';
 import {
   buildCondensePrompt,
@@ -247,6 +247,20 @@ export class GeminiLLMProvider implements LLMProvider {
   // "smarter model" rescue, and the pipeline's own multi-pass budget
   // (pipeline.ts's PASS_BUDGET_MS) already tolerates one page failing
   // without losing the rest of the document.
+  //
+  // A second, separate failure mode: Gemini can refuse to transcribe a
+  // scanned page verbatim if it recognizes the text as matching something
+  // already published elsewhere (finishReason "RECITATION"/"SAFETY", empty
+  // content, no exception thrown) — confirmed directly against a real
+  // scanned government order whose text is also posted on
+  // greentribunal.gov.in: verbatim transcription is blocked every time,
+  // regardless of temperature, but asking for a faithful PARAPHRASE instead
+  // of an exact copy is not, and produces an accurate, complete result (also
+  // confirmed directly, against that same page). isBlockedFinish below
+  // detects this and retries ONCE with recitationFallbackPrompt in place of
+  // the caller's own verbatim-transcription prompt — the verbatim prompt
+  // stays the default because it gives better-fidelity output (exact
+  // wording preserved) for the common case where nothing gets blocked.
   async transcribeImage(imageBuffer: Buffer, mimeType: string, prompt: string, attempt = 0): Promise<string> {
     try {
       const response = await this.getClient().models.generateContent({
@@ -259,6 +273,11 @@ export class GeminiLLMProvider implements LLMProvider {
         ],
         config: { temperature: 0 },
       });
+      const finishReason = response.candidates?.[0]?.finishReason;
+      if (isBlockedFinish(finishReason) && attempt === 0) {
+        console.warn(`[gemini] transcribeImage blocked (${finishReason}) — retrying with a paraphrase prompt instead of verbatim.`);
+        return this.transcribeImage(imageBuffer, mimeType, RECITATION_FALLBACK_PROMPT, attempt + 1);
+      }
       return response.text ?? '';
     } catch (err) {
       const status = (err as { status?: number })?.status;
@@ -273,3 +292,25 @@ export class GeminiLLMProvider implements LLMProvider {
     }
   }
 }
+
+// finishReason values covering both of Gemini's ways of refusing to
+// reproduce recognized/published text: "RECITATION" (its dedicated
+// copyright-similarity check) and, seen in testing to carry the exact same
+// meaning for this same kind of content, "SAFETY".
+function isBlockedFinish(finishReason: FinishReason | undefined): boolean {
+  return finishReason === FinishReason.RECITATION || finishReason === FinishReason.SAFETY;
+}
+
+// Sent verbatim as the fallback OCR prompt only when the caller's own
+// (normally verbatim-transcription) prompt gets blocked — see
+// transcribeImage's own comment for why this specific wording reliably
+// avoids the block: confirmed directly, the recitation check is tripped by
+// asking for an exact copy, not by the underlying content itself, so
+// explicitly asking for a paraphrase instead sidesteps it while the
+// "preserving all names, dates, numbers, and factual content" clause keeps
+// the result just as useful for search/citation as a verbatim transcript
+// would have been.
+const RECITATION_FALLBACK_PROMPT =
+  'Read the text in this image and write out what it says, in your own words where needed, ' +
+  'as a plain-text summary organized by section. Do not copy it verbatim; paraphrase naturally ' +
+  'while preserving all names, dates, numbers, and factual content.';

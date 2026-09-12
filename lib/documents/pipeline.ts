@@ -6,7 +6,7 @@ import {
   claimDocumentForProcessing,
   releaseDocumentProcessingClaim,
 } from '@/lib/db/queries/documents';
-import { insertDocumentChunks, listExistingChunkPageNumbers } from '@/lib/db/queries/chunks';
+import { insertDocumentChunks, listChunksForPreview, listExistingChunkPageNumbers } from '@/lib/db/queries/chunks';
 import { getStorageProvider } from '@/lib/documents/storage';
 import { extractStructuredText, MULTI_SEGMENT_MIME_TYPES } from '@/lib/documents/textExtraction';
 import { chunkText } from '@/lib/documents/chunking';
@@ -151,39 +151,77 @@ export async function processDocument(documentId: string): Promise<void> {
 
     let insertedChunkCount = 0;
 
-    // --- Pass 1 of this invocation: every NON-scanned segment, exactly
-    // like a normal document (fast — no vision calls involved at all). On
-    // a resumed invocation this is a no-op for a pure-scan document (every
-    // page is in scannedPageNumbers), and for a mixed document it only
-    // does the (cheap) work of re-chunking segments already inserted
-    // before skipping them via alreadyDone.
-    const freshChunks: PendingChunk[] = [];
+    // --- Pass 1 of this invocation: every NON-scanned segment, one at a
+    // time (embedded and inserted individually, not collected into one
+    // giant embed() call) so a document with a LOT of segments can span
+    // multiple invocations the same way pass 2's OCR loop already does —
+    // checked via the same PASS_BUDGET_MS budget, and resumed the same way
+    // via alreadyDone. This used to be one unconditional embed() call for
+    // every non-scanned segment at once; that broke in two ways confirmed
+    // directly against a real 145-page, ~700-chunk PDF: (1) Gemini's
+    // free-tier embedding quota is metered per TEXT, not per HTTP call (see
+    // geminiEmbeddingProvider.ts's BATCH_MIN_INTERVAL_MS comment), so a
+    // document with enough chunks would exceed it on the very first
+    // attempt, permanently, regardless of which key was used; and (2) once
+    // that provider paces its own batches to respect that quota, one
+    // uninterrupted embed() call for a whole large document would run for
+    // MINUTES — far past the 60s maxDuration every route/action reaching
+    // processDocument() shares — getting silently killed mid-write, the
+    // exact failure class PASS_BUDGET_MS already exists to avoid for OCR
+    // (see that constant's own comment). Splitting pass 1 into the same
+    // per-page, budget-checked, resumable shape as pass 2 fixes both: each
+    // invocation does as much as fits in its budget and stays under the
+    // quota, and the idle-nudge picks up the rest, exactly like a scanned
+    // document already does.
+    let pass1BudgetExceeded = false;
     let sequentialPage = 0;
     for (const segment of segments) {
+      if (Date.now() - passStart > PASS_BUDGET_MS) {
+        pass1BudgetExceeded = true;
+        break;
+      }
       const pageNumber = hasNativePagination ? segment.pageNumber : ++sequentialPage;
       if (pageNumber !== null && scannedPageNumbers.has(pageNumber)) continue; // handled below
-      if (pageNumber !== null && alreadyDone.has(pageNumber)) continue; // earlier pass
-      for (const c of chunkText(segment.text, { size: 1000, overlap: 150 })) {
-        freshChunks.push({ index: freshChunks.length, content: c.content, pageNumber });
-      }
-    }
+      if (pageNumber !== null && alreadyDone.has(pageNumber)) continue; // earlier pass/invocation
 
-    if (freshChunks.length > 0) {
+      const segmentChunks: PendingChunk[] = chunkText(segment.text, { size: 1000, overlap: 150 }).map((c, i) => ({
+        index: i,
+        content: c.content,
+        pageNumber,
+      }));
+      if (segmentChunks.length === 0) {
+        if (pageNumber !== null) alreadyDone.add(pageNumber);
+        continue;
+      }
+
       const embedder = await getEmbeddingProvider();
-      const vectors = await embedder.embed(freshChunks.map((c) => c.content), 'RETRIEVAL_DOCUMENT');
+      const vectors = await embedder.embed(
+        segmentChunks.map((c) => c.content),
+        'RETRIEVAL_DOCUMENT',
+      );
       // clearanceLevel AND departments are copied onto every chunk here —
       // see the denormalization note in prisma/schema.prisma and
       // lib/db/queries/chunks.ts.
       await insertDocumentChunks(
         documentId,
-        freshChunks,
+        segmentChunks,
         vectors,
         doc.clearanceLevel,
         doc.departments.map((d) => d.id),
         embedder.provider,
         embedder.model,
       );
-      insertedChunkCount += freshChunks.length;
+      insertedChunkCount += segmentChunks.length;
+      if (pageNumber !== null) alreadyDone.add(pageNumber);
+    }
+
+    if (pass1BudgetExceeded) {
+      // Out of budget with non-scanned segments left — leave the document
+      // exactly as PROCESSING (already set above) with whatever was
+      // inserted so far. The idle-nudge in the status route calls
+      // processDocument() again once this pass has gone quiet; nothing
+      // more to do in THIS pass, including pass 2 below.
+      return;
     }
 
     // --- Pass 2 of this invocation: OCR whatever scanned pages remain,
@@ -293,8 +331,12 @@ export async function processDocument(documentId: string): Promise<void> {
               .map((s) => ({ pageNumber: s.pageNumber, text: s.text }))
           // One page per chunk — see the pageNumber assignment above,
           // which this must match exactly for #page=N / getPage(N) to
-          // land on the right content.
-          : freshChunks.map((c) => ({ pageNumber: c.pageNumber!, text: c.content }));
+          // land on the right content. Read back from the database rather
+          // than an in-memory list from pass 1 above, since pass 1 can now
+          // span multiple invocations (see its own comment) — only a fresh
+          // read is guaranteed to have every chunk, not just this
+          // invocation's share of them.
+          : (await listChunksForPreview(documentId)).map((c) => ({ pageNumber: c.pageNumber, text: c.content }));
 
         const pdfBuffer = await renderPagesToPdf(renderablePages, doc.name);
         previewFileKey = await storage.save(`${doc.name}-preview.pdf`, pdfBuffer);

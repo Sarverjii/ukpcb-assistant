@@ -376,3 +376,25 @@ export async function listExistingChunkPageNumbers(documentId: string): Promise<
   });
   return new Set(rows.map((r) => r.pageNumber!));
 }
+
+export type ChunkForPreview = { pageNumber: number; content: string };
+
+/**
+ * Every chunk of a non-natively-paginated document (DOCX/TXT/MD — see
+ * MULTI_SEGMENT_MIME_TYPES), ordered the same way they were originally
+ * inserted, for building that document's preview PDF (one rendered page
+ * per chunk — see pipeline.ts's own comment on previewFileKey generation).
+ * Reads back from the database rather than reusing an in-memory list from
+ * whichever pass(es) inserted them, since pass 1 can now span multiple
+ * invocations of processDocument() (see PASS_BUDGET_MS's own comment) —
+ * only the LAST of those invocations, the one that reaches this point,
+ * has ever seen every chunk at once.
+ */
+export async function listChunksForPreview(documentId: string): Promise<ChunkForPreview[]> {
+  const rows = await prisma.documentChunk.findMany({
+    where: { documentId, pageNumber: { not: null } },
+    select: { pageNumber: true, content: true },
+    orderBy: [{ pageNumber: 'asc' }, { chunkIndex: 'asc' }],
+  });
+  return rows.map((r) => ({ pageNumber: r.pageNumber!, content: r.content }));
+}
