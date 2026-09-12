@@ -20,12 +20,15 @@
 //      fetchDocumentStatus and processFile below), so a document deleted
 //      by hand through the admin UI since the last run is correctly
 //      re-uploaded instead of silently staying skipped forever.
-//   3. Uploads everything that's genuinely still missing, one file at a
-//      time, and records the outcome — success, a real processing
-//      failure, or an infrastructure error — before moving on, so a
-//      single bad file or a network blip never stops the rest of the
-//      batch and never has to be re-uploaded once it has actually
-//      succeeded.
+//   3. Uploads everything that's genuinely still missing, up to
+//      CONCURRENCY files at once (each file's own wait for the server —
+//      OCR passes, the embedding call — is the dominant per-file cost, so
+//      running several in parallel overlaps those waits instead of
+//      paying them one after another), and records each outcome —
+//      success, a real processing failure, or an infrastructure error —
+//      as it finishes, so a single bad file or a network blip never stops
+//      the rest of the batch and never has to be re-uploaded once it has
+//      actually succeeded.
 //
 // See README.md in this folder for setup and scheduling instructions on
 // both Linux and Windows.
@@ -141,9 +144,27 @@ const PASSWORD = process.env.UKPCB_PASSWORD || '';
 // more restrictive.
 const CLEARANCE_LEVEL_OVERRIDE =
   process.env.CLEARANCE_LEVEL !== undefined ? Number(process.env.CLEARANCE_LEVEL) : null;
-const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5000);
+const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 2000);
 const POLL_TIMEOUT_MS = Number(process.env.POLL_TIMEOUT_MS ?? 10 * 60 * 1000);
 const LOCK_STALE_MS = Number(process.env.LOCK_STALE_MS ?? 6 * 60 * 60 * 1000);
+// How many files to upload/process at once. Each file's own wait for the
+// server (OCR passes, the embedding call) is the dominant cost per file —
+// running several concurrently overlaps those waits instead of paying them
+// one after another, which is the single biggest lever on total run time
+// for a folder of many files. Higher isn't free, though: every concurrent
+// file is its own stream of real Gemini API calls (embeddings, and OCR's
+// vision calls), so raising this burns through a free-tier rate/quota
+// limit that much faster — 3 is a conservative default, not a ceiling.
+const CONCURRENCY = Math.max(1, Number(process.env.CONCURRENCY ?? 3));
+// Retries for a single status-check request before treating it as a real
+// failure — a bare `fetch` to a serverless endpoint occasionally times out
+// or drops for reasons that have nothing to do with the document itself
+// (see HeadersTimeoutError in Node's undici). Previously one such blip on
+// ANY file's status poll threw all the way out to main()'s catch and
+// aborted the entire remaining run, discarding whatever was left in the
+// batch even though nothing was actually wrong with those files.
+const STATUS_FETCH_RETRIES = Math.max(1, Number(process.env.STATUS_FETCH_RETRIES ?? 4));
+const STATUS_FETCH_RETRY_BASE_MS = Number(process.env.STATUS_FETCH_RETRY_BASE_MS ?? 2000);
 
 const DOCUMENTS_DIR = path.join(SCRIPT_DIR, 'Documents');
 const STATE_PATH = path.join(SCRIPT_DIR, 'upload-state.json');
@@ -227,10 +248,31 @@ async function loadState() {
   }
   return { version: 1, files: {} };
 }
-async function saveState(state) {
-  const tmpPath = `${STATE_PATH}.tmp-${process.pid}`;
-  await writeFile(tmpPath, JSON.stringify(state, null, 2));
-  await rename(tmpPath, STATE_PATH);
+// With files now processed concurrently (see CONCURRENCY), multiple
+// in-flight saveState() calls could otherwise race: two writes started
+// close together can finish their temp-file-then-rename in either order,
+// so a save queued earlier (with less of the batch's progress captured)
+// could overwrite one queued later and silently drop a just-recorded
+// entry. Chaining every save through this one promise serializes the
+// actual disk writes to happen strictly in call order — `state` itself is
+// still one shared, freshest-always object, so a save that runs later
+// than it was queued still writes the current, fullest state, not a stale
+// snapshot from when it was queued.
+let saveQueue = Promise.resolve();
+function saveState(state) {
+  // Swallow a failed write's rejection INSIDE the chain (after this call's
+  // own promise has already reported it to its caller below) rather than
+  // letting it propagate into saveQueue itself — otherwise a rejected
+  // saveQueue would short-circuit every `.then()` chained after it, and
+  // every subsequent save for the rest of the run would silently never
+  // run at all.
+  const thisSave = saveQueue.then(async () => {
+    const tmpPath = `${STATE_PATH}.tmp-${process.pid}`;
+    await writeFile(tmpPath, JSON.stringify(state, null, 2));
+    await rename(tmpPath, STATE_PATH);
+  });
+  saveQueue = thisSave.catch(() => {});
+  return thisSave;
 }
 
 // --------------------------------------------------------------------
@@ -414,15 +456,32 @@ async function fetchUploadDefaults(cookieHeader) {
 // are transient/unknown, and deliberately NOT treated the same as a
 // confirmed deletion; see processFile's try/catch around this.
 // --------------------------------------------------------------------
+// Retries a transient failure (a dropped connection, a timed-out response
+// — see STATUS_FETCH_RETRIES above) up to STATUS_FETCH_RETRIES times with
+// a short backoff before finally throwing. A confirmed 404 is NOT a
+// transient failure — it's a real, final answer ("this document doesn't
+// exist") — so it still returns null immediately, same as before, with no
+// retry.
 async function fetchDocumentStatus(documentId, cookieHeader) {
-  const res = await fetch(`${BASE_URL}/api/documents/${documentId}/status`, {
-    headers: { Cookie: cookieHeader },
-  });
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    throw new Error(`Status check failed: HTTP ${res.status}`);
+  let lastErr;
+  for (let attempt = 1; attempt <= STATUS_FETCH_RETRIES; attempt++) {
+    try {
+      const res = await fetch(`${BASE_URL}/api/documents/${documentId}/status`, {
+        headers: { Cookie: cookieHeader },
+      });
+      if (res.status === 404) return null;
+      if (!res.ok) {
+        throw new Error(`Status check failed: HTTP ${res.status}`);
+      }
+      return await res.json();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < STATUS_FETCH_RETRIES) {
+        await sleep(STATUS_FETCH_RETRY_BASE_MS * attempt);
+      }
+    }
   }
-  return res.json();
+  throw lastErr;
 }
 
 // Poll until the server's own status endpoint reaches READY or FAILED, or
@@ -555,8 +614,19 @@ async function processFile(filePath, cookieHeader, defaults, state) {
     }
     if (serverState?.status === 'PENDING' || serverState?.status === 'PROCESSING') {
       await log(`RESUME ${relPath} — a previous run uploaded this file (documentId=${existing.documentId}) and it's still being processed. Re-checking instead of re-uploading.`);
-      const result = await waitForProcessing(existing.documentId, cookieHeader);
-      return recordOutcome(state, hash, existing.documentId, relPath, baseName, existing.attempts ?? 1, result);
+      try {
+        const result = await waitForProcessing(existing.documentId, cookieHeader);
+        return recordOutcome(state, hash, existing.documentId, relPath, baseName, existing.attempts ?? 1, result);
+      } catch (err) {
+        // A status check inside waitForProcessing exhausted its own
+        // retries (see fetchDocumentStatus) — real network trouble, not
+        // this file's fault. Leave the ledger as pending_processing (it
+        // already is) and move on to the next file rather than letting
+        // this throw take the whole remaining run down with it; the next
+        // run resumes checking this exact document.
+        await log(`WARN   ${relPath} — could not check on this file's processing this run: ${err.message}. Leaving it pending; the next run will check again.`);
+        return 'skip-check-failed';
+      }
     }
     // serverState === null: a 404 — this document no longer exists (most
     // likely deleted through the admin UI since the last run). Forget the
@@ -626,8 +696,18 @@ async function processFile(filePath, cookieHeader, defaults, state) {
   };
   await saveState(state);
 
-  const result = await waitForProcessing(documentId, cookieHeader);
-  return recordOutcome(state, hash, documentId, relPath, baseName, attempts, result);
+  try {
+    const result = await waitForProcessing(documentId, cookieHeader);
+    return recordOutcome(state, hash, documentId, relPath, baseName, attempts, result);
+  } catch (err) {
+    // Same reasoning as the RESUME path above: the ledger already has
+    // this file recorded as pending_processing (written just above,
+    // before polling started), so there's nothing to lose by moving on —
+    // the next run's RESUME path picks up checking this exact document
+    // instead of re-uploading it.
+    await log(`WARN   ${relPath} — uploaded but could not check on processing this run: ${err.message}. Leaving it pending; the next run will check again.`);
+    return 'skip-check-failed';
+  }
 }
 
 // --------------------------------------------------------------------
@@ -646,7 +726,7 @@ async function main() {
       await log(`No files found in ${DOCUMENTS_DIR} — nothing to do.`);
       return;
     }
-    await log(`Found ${files.length} file(s) in the Documents folder.`);
+    await log(`Found ${files.length} file(s) in the Documents folder. Processing up to ${Math.min(CONCURRENCY, files.length)} at once.`);
 
     let cookieHeader;
     try {
@@ -686,10 +766,20 @@ async function main() {
       'deleted-mid-run': 0,
     };
 
-    for (const filePath of files) {
-      const outcome = await processFile(filePath, cookieHeader, defaults, state);
-      counts[outcome] = (counts[outcome] ?? 0) + 1;
+    // A pool of CONCURRENCY workers pulling from a shared index — plain
+    // `index++` between the `await`s below is safe with no lock needed:
+    // Node's event loop only ever runs one synchronous slice of JS at a
+    // time, so two workers can never read the same index value.
+    let nextIndex = 0;
+    async function worker() {
+      while (true) {
+        const i = nextIndex++;
+        if (i >= files.length) return;
+        const outcome = await processFile(files[i], cookieHeader, defaults, state);
+        counts[outcome] = (counts[outcome] ?? 0) + 1;
+      }
     }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, files.length) }, () => worker()));
 
     await log('---------------------------- summary ----------------------------');
     await log(`Uploaded and processed successfully : ${counts.uploaded}`);
