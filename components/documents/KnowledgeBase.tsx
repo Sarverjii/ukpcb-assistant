@@ -10,7 +10,7 @@ import { WebsiteGroups } from '@/components/documents/WebsiteGroups';
 import { DocumentsTable, type DocumentRow } from '@/components/documents/DocumentsTable';
 import { useUploadQueue } from '@/components/documents/UploadQueueContext';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
-import { isRateLimitError } from '@/lib/ai/errors';
+import { isDailyQuotaError, isRateLimitError } from '@/lib/ai/errors';
 import { retryDocumentAction } from '@/app/(app)/knowledge-base/actions';
 
 type Role = { hierarchyRank: number; name: string };
@@ -77,6 +77,15 @@ export function KnowledgeBase({
     () => documents.filter((d) => d.status === 'FAILED' && isRateLimitError(d.processingError)),
     [documents],
   );
+  // Any of the above specifically a DAILY quota exhaustion (see
+  // isDailyQuotaError's own comment) rather than a short per-minute one —
+  // changes the banner's own advice below, since "switch to a fresh key"
+  // is actively WRONG guidance for this case: a key from the same Google
+  // Cloud project shares the exact same daily allowance and will fail
+  // identically, immediately. Confirmed directly: an admin followed that
+  // exact advice, pasted a "new" key, and watched it fail the same way
+  // seconds later, repeatedly, because it was the same project's quota.
+  const dailyQuotaFailed = useMemo(() => rateLimitedFailed.some((d) => isDailyQuotaError(d.processingError)), [rateLimitedFailed]);
 
   function handleRetryAll() {
     startRetryAll(async () => {
@@ -134,11 +143,18 @@ export function KnowledgeBase({
           <span className="flex items-center gap-2">
             <AlertTriangle size={16} className="shrink-0" />
             {rateLimitedFailed.length === 1
-              ? '1 document stopped processing — the AI provider hit its rate/usage limit.'
-              : `${rateLimitedFailed.length} documents stopped processing — the AI provider hit its rate/usage limit.`}{' '}
-            {isAdmin
-              ? 'Switch to a fresh API key in AI Models, then retry — it resumes from where each one left off, not from scratch.'
-              : 'An administrator needs to switch to a fresh API key before these can finish.'}
+              ? '1 document stopped processing'
+              : `${rateLimitedFailed.length} documents stopped processing`}{' '}
+            {dailyQuotaFailed
+              ? "— the AI provider's DAILY usage limit is exhausted."
+              : '— the AI provider hit its rate/usage limit.'}{' '}
+            {dailyQuotaFailed
+              ? isAdmin
+                ? "A new key from the SAME Google account won't help — it shares this daily allowance and will fail the same way immediately. Either wait ~24h for it to reset, or switch to a key from a genuinely different Google Cloud project in AI Models, then retry."
+                : 'An administrator needs to wait for the daily limit to reset (~24h) or switch to a key from a different Google Cloud project before these can finish.'
+              : isAdmin
+                ? 'Switch to a fresh API key in AI Models, then retry — it resumes from where each one left off, not from scratch.'
+                : 'An administrator needs to switch to a fresh API key before these can finish.'}
           </span>
           <span className="flex shrink-0 items-center gap-2">
             {isAdmin && (

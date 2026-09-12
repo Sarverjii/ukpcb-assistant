@@ -16,7 +16,7 @@ import { ACCEPTED_EXTENSIONS } from '@/lib/documents/uploadClient';
 import { DepartmentCheckboxList } from '@/components/shared/DepartmentCheckboxList';
 import { ClearanceLevelPicker } from '@/components/shared/ClearanceLevelPicker';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
-import { isRateLimitError } from '@/lib/ai/errors';
+import { isDailyQuotaError, isRateLimitError } from '@/lib/ai/errors';
 
 export type DocumentRow = {
   id: string;
@@ -403,9 +403,11 @@ function DocumentRow({
             }`}
             title={doc.processingError}
           >
-            {isRateLimitError(doc.processingError)
-              ? 'The AI provider hit its rate/usage limit.'
-              : doc.processingError}
+            {isDailyQuotaError(doc.processingError)
+              ? "The AI provider's DAILY quota is exhausted — retrying (even with a new key from the same account) won't help until it resets in ~24h; use a key from a different Google Cloud project to continue now."
+              : isRateLimitError(doc.processingError)
+                ? 'The AI provider hit a short per-minute limit — retry should work again shortly.'
+                : doc.processingError}
           </p>
         )}
       </td>

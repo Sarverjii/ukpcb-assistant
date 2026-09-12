@@ -46,3 +46,29 @@ export function isRateLimitError(message: string | null | undefined): boolean {
   if (!message) return false;
   return /resource_exhausted|rate.?limit(?:ed)?|quota|\b429\b|too many requests/i.test(message);
 }
+
+/**
+ * True when a rate-limit error (see isRateLimitError above) is
+ * specifically Gemini's free-tier DAILY quota (a "...PerDay..." quotaId,
+ * confirmed directly: e.g.
+ * "EmbedContentRequestsPerDayPerProjectPerModel-FreeTier"), as opposed to
+ * its much shorter PER-MINUTE one. The distinction matters for what an
+ * admin should actually DO about it: a per-minute limit clears on its own
+ * within roughly a minute, so retrying — with the same key or a new one —
+ * genuinely helps. A daily limit does not: it's scoped to the API key's
+ * underlying Google Cloud PROJECT, not the literal key string, so pasting
+ * "a new key" only helps if it comes from a genuinely different Google
+ * account/project — two keys from the same AI Studio account share the
+ * exact same daily allowance and will hit this identically, immediately,
+ * no matter how many times you swap between them (confirmed directly:
+ * a key that worked in isolation hit this again within a few dozen
+ * requests once real document processing resumed). Without this
+ * distinction, an admin retrying a daily-capped document sees what looks
+ * like the SAME "give me a new key" prompt fail over and over and has no
+ * way to tell that's expected, not a bug — see KnowledgeBase.tsx and
+ * DocumentsTable.tsx for where this changes the message shown.
+ */
+export function isDailyQuotaError(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return /perday/i.test(message);
+}
