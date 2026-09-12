@@ -334,16 +334,22 @@ model Document {
   uploadedBy          User?          @relation("UploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
   status              DocumentStatus @default(PENDING)
   processingError     String?
-  // Set only while a scanned PDF (a page with no text layer at all — see
-  // lib/documents/pipeline.ts's own comment) is being OCR'd: total pages
-  // detected as needing OCR, and how many have been transcribed and
-  // embedded so far. Both null for every ordinary document. A single
-  // processDocument() pass can't always finish OCR-ing every page of a
-  // long scan within Vercel's maxDuration (a vision-model call takes
-  // several real seconds per page), so these two columns are what let a
-  // later pass resume exactly where an earlier one left off, and let the
-  // upload UI show real "page N of M" progress instead of an indefinite
-  // "Processing…" for however long a long scan takes.
+  // Set for every document while it's PROCESSING (both null only before
+  // processing starts, or once it's READY/FAILED): total pages/segments in
+  // the document, and how many have been embedded (and, for a scanned page
+  // — see lib/documents/pipeline.ts's own comment — OCR'd first) so far.
+  // Despite the name, this tracks BOTH of pipeline.ts's passes, not just
+  // OCR — a non-scanned document's ordinary text-embedding pass counts
+  // here too. A single processDocument() invocation can't always finish
+  // embedding every page of a large document within Vercel's maxDuration,
+  // so these two columns are what let a later invocation resume exactly
+  // where an earlier one left off (see app/api/documents/[id]/status/
+  // route.ts's idle-nudge, which is GATED on this being non-null — that's
+  // the reason it's set unconditionally now, not just for scans: a
+  // document pass 1 leaves mid-way with this still null would never get
+  // resumed at all), and let the upload UI show real "page N of M"
+  // progress instead of an indefinite "Processing…" for however long a
+  // large document takes.
   ocrPagesTotal       Int?
   ocrPagesDone        Int?
   // A real hold-for-the-duration lock (not the same thing as updatedAt,

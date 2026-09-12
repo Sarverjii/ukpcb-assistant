@@ -481,12 +481,14 @@ function StatusPill({
   ocrPagesTotal?: number | null;
   ocrPagesDone?: number | null;
 }) {
-  // See UploadForm.tsx's matching StatusPill comment — a scanned PDF can
-  // take multiple processing passes, so "PROCESSING" alone would look
-  // stuck for however long that takes.
+  // See UploadForm.tsx's matching StatusPill comment — a large document
+  // (scanned or not) can take multiple processing passes, so "PROCESSING"
+  // alone would look stuck for however long that takes. Deliberately
+  // generic ("Page", not "OCR") since these fields now track ordinary
+  // text-page progress too, not just OCR'd pages.
   const label =
     status === 'PROCESSING' && ocrPagesTotal
-      ? `OCR ${Math.min((ocrPagesDone ?? 0) + 1, ocrPagesTotal)}/${ocrPagesTotal}`
+      ? `Page ${Math.min((ocrPagesDone ?? 0) + 1, ocrPagesTotal)}/${ocrPagesTotal}`
       : status;
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[status] ?? ''}`}>

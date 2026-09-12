@@ -149,6 +149,23 @@ export async function processDocument(documentId: string): Promise<void> {
     const alreadyDone = await listExistingChunkPageNumbers(documentId);
     const hadExistingContent = alreadyDone.size > 0;
 
+    // ocrPagesTotal/ocrPagesDone (see their schema comment) now track BOTH
+    // passes' combined progress, not just OCR — every segment (native-text
+    // or scanned) counts toward the same total. This is set unconditionally,
+    // for every document, from the very first invocation, for a reason more
+    // important than the progress number itself: app/api/documents/[id]/
+    // status/route.ts's idle-nudge — the ONLY thing that ever calls
+    // processDocument() again for a document a pass left mid-way — only
+    // fires when ocrPagesTotal is non-null. Before this, that column was
+    // set ONLY for scanned documents, so a pass 1 that ran out of budget
+    // (see PASS_BUDGET_MS below) on an ordinary, non-scanned document had
+    // no way to ever resume: nothing was watching it. Confirmed directly —
+    // a real 145-page PDF got partway through pass 1, returned still
+    // PROCESSING, and then sat there untouched for 45+ minutes with no
+    // further progress, because ocrPagesTotal was null the entire time.
+    const totalPageCount = segments.length;
+    await setOcrProgress(documentId, alreadyDone.size, totalPageCount);
+
     let insertedChunkCount = 0;
 
     // --- Pass 1 of this invocation: every NON-scanned segment, one at a
@@ -190,7 +207,10 @@ export async function processDocument(documentId: string): Promise<void> {
         pageNumber,
       }));
       if (segmentChunks.length === 0) {
-        if (pageNumber !== null) alreadyDone.add(pageNumber);
+        if (pageNumber !== null) {
+          alreadyDone.add(pageNumber);
+          await setOcrProgress(documentId, alreadyDone.size, totalPageCount);
+        }
         continue;
       }
 
@@ -212,7 +232,10 @@ export async function processDocument(documentId: string): Promise<void> {
         embedder.model,
       );
       insertedChunkCount += segmentChunks.length;
-      if (pageNumber !== null) alreadyDone.add(pageNumber);
+      if (pageNumber !== null) {
+        alreadyDone.add(pageNumber);
+        await setOcrProgress(documentId, alreadyDone.size, totalPageCount);
+      }
     }
 
     if (pass1BudgetExceeded) {
@@ -226,18 +249,12 @@ export async function processDocument(documentId: string): Promise<void> {
 
     // --- Pass 2 of this invocation: OCR whatever scanned pages remain,
     // one at a time, until either they're all done or this pass's time
-    // budget runs out.
+    // budget runs out. Progress reporting shares the same alreadyDone/
+    // totalPageCount counters pass 1 uses above — one running total across
+    // both passes, not two separate ones (a mixed document with both
+    // native-text and scanned pages would otherwise show progress that
+    // jumps backward the moment pass 2 starts).
     const remainingScannedPages = [...scannedPageNumbers].filter((p) => !alreadyDone.has(p)).sort((a, b) => a - b);
-    // ocrPagesTotal is set once and never shrinks across passes — the total
-    // was already fully known (every scanned page pdf-parse found on THIS
-    // pass, which re-parses the whole PDF every time) the moment this
-    // document was first identified as a scan. doneCount tracks page
-    // ATTEMPTS, not successes — see the catch block below for why a
-    // failed page still counts toward it.
-    let doneCount = scannedPageNumbers.size - remainingScannedPages.length;
-    if (scannedPageNumbers.size > 0) {
-      await setOcrProgress(documentId, doneCount, scannedPageNumbers.size);
-    }
 
     if (remainingScannedPages.length > 0) {
       const llm = await getLLMProvider();
@@ -287,9 +304,12 @@ export async function processDocument(documentId: string): Promise<void> {
           insertedChunkCount += pageChunks.length;
         }
 
+        // alreadyDone gains this page whether or not pageChunks ended up
+        // empty — a page whose OCR failed still counts as ATTEMPTED (see
+        // the catch block above), so a permanently-unreadable page doesn't
+        // cause every future idle-nudge to retry it forever.
         alreadyDone.add(pageNumber);
-        doneCount += 1;
-        await setOcrProgress(documentId, doneCount, scannedPageNumbers.size);
+        await setOcrProgress(documentId, alreadyDone.size, totalPageCount);
       }
     }
 
@@ -304,10 +324,11 @@ export async function processDocument(documentId: string): Promise<void> {
 
     // hadExistingContent covers "an earlier pass already inserted real
     // content"; insertedChunkCount covers "this pass did." Neither counts
-    // a page that was merely ATTEMPTED-and-failed (see doneCount above) as
-    // content, so a scan where every single page's OCR genuinely failed
-    // still correctly throws here instead of silently becoming an empty,
-    // unsearchable "READY" document.
+    // a page that was merely ATTEMPTED-and-failed (added to alreadyDone
+    // above without ever incrementing insertedChunkCount) as content, so a
+    // scan where every single page's OCR genuinely failed still correctly
+    // throws here instead of silently becoming an empty, unsearchable
+    // "READY" document.
     if (!hadExistingContent && insertedChunkCount === 0) {
       throw new Error('No extractable text found in document.');
     }

@@ -555,13 +555,16 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 function StatusPill({ status, ocrProgress }: { status: Status; ocrProgress?: OcrProgress | null }) {
-  // A scanned PDF can take multiple processing passes (see
-  // pipeline.ts's own comment) — "Processing…" alone would look stuck for
-  // however long that takes, so this shows real page-by-page progress
-  // instead whenever it's available.
+  // A large document — scanned (multi-pass OCR) or not (multi-pass
+  // embedding, see pipeline.ts's own comment on why that's now also
+  // resumable across passes) — can take multiple processing passes, so
+  // "Processing…" alone would look stuck for however long that takes; this
+  // shows real page-by-page progress instead whenever it's available.
+  // Deliberately generic ("page", not "scanned page") since ocrProgress now
+  // covers ordinary text pages too, not just OCR'd ones.
   const label =
     status === 'PROCESSING' && ocrProgress
-      ? `Processing — reading scanned page ${Math.min(ocrProgress.done + 1, ocrProgress.total)} of ${ocrProgress.total}…`
+      ? `Processing — page ${Math.min(ocrProgress.done + 1, ocrProgress.total)} of ${ocrProgress.total}…`
       : (STATUS_LABELS[status] ?? status);
   return (
     <span
