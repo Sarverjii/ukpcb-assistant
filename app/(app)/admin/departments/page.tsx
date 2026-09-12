@@ -11,11 +11,13 @@ export default async function DepartmentsPage() {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-zinc-500 dark:text-zinc-400">
-        Departments are purely additive to the clearance hierarchy — a document tagged with a
-        department is visible to everyone in it, regardless of their own clearance, on top of
-        whoever the clearance level already covers. An employee can belong to any number of
-        departments, or none. Open a department to edit its description, set a head, mark it a head
-        department, manage members, and see what it grants access to.
+        Clearance and department work together, not as alternatives: a document tagged with a
+        department is visible only to someone whose clearance already covers it <em>and</em> who
+        belongs to that department (or has head-department access) — department membership never
+        substitutes for missing clearance, it only narrows what clearance already admits. A
+        document with no department at all is governed by clearance alone. Every employee must
+        belong to at least one department. Open a department to edit its description, set a head,
+        mark it a head department, manage members, and see what it grants access to.
       </p>
       <DepartmentGrid
         departments={departments.map((d) => ({

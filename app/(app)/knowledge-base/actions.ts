@@ -77,10 +77,12 @@ export async function changeDocumentClearanceAction(
 /**
  * Retags which departments a document belongs to — same "manage at or
  * below your own clearance" gate as changeDocumentClearanceAction, but
- * doesn't touch clearanceLevel itself; departments are purely additive to
- * that boundary, never a way to raise or lower it. Re-indexes the
- * denormalized DocumentChunk.departmentIds immediately, exactly mirroring
- * changeDocumentClearanceAction's own re-indexing.
+ * doesn't touch clearanceLevel itself; department tags only ever narrow
+ * who among the clearance-eligible can see the document (see
+ * lib/db/queries/chunks.ts's doc comment for the actual AND semantics),
+ * never a way to raise or lower the clearance boundary itself. Re-indexes
+ * the denormalized DocumentChunk.departmentIds immediately, exactly
+ * mirroring changeDocumentClearanceAction's own re-indexing.
  */
 export async function changeDocumentDepartmentsAction(
   documentId: string,
