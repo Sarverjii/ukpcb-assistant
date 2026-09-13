@@ -23,7 +23,17 @@ const nextConfig: NextConfig = {
   // place a native addon inside an ESM chunk at all ("non-ecmascript
   // placeable asset"), the same fundamental issue as onnxruntime-node
   // below, just caught at build time instead of only in production.
-  serverExternalPackages: ['@huggingface/transformers', 'pdf-parse', '@napi-rs/canvas'],
+  // pdfjs-dist itself (imported directly by pdfRasterize.ts, separately
+  // from pdf-parse's own bundled copy above) needs the same treatment for
+  // a different reason: it locates its own OpenJPEG WASM module (needed
+  // to decode JPEG2000-compressed scanned-page images — see
+  // pdfRasterize.ts's own comment) via createRequire/require.resolve at
+  // runtime. Left bundled, Turbopack rewrites that call to return one of
+  // its own internal module ids instead of a real filesystem path,
+  // failing the whole build with "The 'path' argument must be of type
+  // string. Received type number" — confirmed directly, this exact
+  // failure, the moment that lookup was added.
+  serverExternalPackages: ['@huggingface/transformers', 'pdf-parse', '@napi-rs/canvas', 'pdfjs-dist'],
   // Vercel's build only deploys the files its file-tracer (@vercel/nft)
   // can statically determine a route actually needs — not the full
   // node_modules tree. onnxruntime-node's native addon selects its
@@ -42,6 +52,11 @@ const nextConfig: NextConfig = {
   // import, so nft misses it too — confirmed directly, every PDF upload in
   // production failed with "Setting up fake worker failed: Cannot find
   // module '.../pdf.worker.mjs'" even after the onnxruntime fix above.
+  // pdfjs-dist's wasm/ directory (see the serverExternalPackages comment
+  // above) is the same class of miss again: referenced only via a runtime
+  // require.resolve() call nft's static analysis can't see, so it would
+  // otherwise be silently dropped from the deployed bundle exactly like
+  // the worker script and onnxruntime binary were.
   outputFileTracingIncludes: {
     '/**': [
       './node_modules/onnxruntime-node/bin/napi-v6/linux/x64/libonnxruntime.so.1',
@@ -49,6 +64,7 @@ const nextConfig: NextConfig = {
       './node_modules/onnxruntime-node/bin/napi-v6/linux/x64/onnxruntime_binding.node',
       './node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs',
       './node_modules/pdfjs-dist/build/pdf.worker.mjs',
+      './node_modules/pdfjs-dist/wasm/*',
     ],
   },
   // Hides the dev-only route indicator badge (bottom-left by default).

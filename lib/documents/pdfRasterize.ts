@@ -13,7 +13,43 @@
 // image the same way the dommatrix polyfill in textExtraction.ts was
 // chosen for being a pure-JS/portable dependency over anything needing a
 // real browser/DOM environment.
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+
+// Points pdfjs at its own bundled OpenJPEG WASM module (ships inside the
+// package already — nothing extra to install, and explicitly force-
+// included in the deployed bundle by next.config.ts's
+// outputFileTracingIncludes, since nothing statically importable
+// references it), needed to decode JPEG2000 (JPX) images, the compression
+// some real scanned PDFs use for their page images. Without this, pdfjs
+// doesn't just skip JPX images — it throws immediately ("Ensure that the
+// `wasmUrl` API parameter is provided"), caught nowhere in this module, so
+// page.render() below silently produces a BLANK canvas for that page (no
+// exception at all) instead of ever failing loudly. Confirmed directly
+// against a real 4-page scanned document using JPX: every page came back
+// nearly blank (~11KB PNGs vs. ~680KB with real content once this was
+// set), which Gemini then correctly reported as having no visible text to
+// transcribe — not a RECITATION block, not a real OCR failure, just
+// genuinely blank input — producing the exact same misleading "No
+// extractable text found in document." this app's own error handling
+// reserves for a page that really has nothing on it.
+//
+// Built from process.cwd() rather than any module-resolution call
+// (import.meta.resolve, createRequire().resolve) — confirmed directly
+// that BOTH fail once this file passes through Turbopack's server
+// bundling: import.meta.resolve throws "resolve is not a function", and
+// createRequire's require.resolve returns one of Turbopack's own internal
+// numeric module ids instead of a real filesystem path (TypeError: "path"
+// argument must be of type string, received type number), even with
+// pdfjs-dist itself marked serverExternalPackages — the resolution call
+// site (this file) is still bundled, regardless of whether its target is.
+// process.cwd() is the project root in both local dev and a deployed
+// Vercel function, and node_modules/pdfjs-dist/wasm is guaranteed present
+// there by outputFileTracingIncludes above, so this needs no resolution
+// at all. pathToFileURL (not a hand-built file:// string) correctly
+// percent-encodes a path containing spaces.
+const PDFJS_WASM_URL = pathToFileURL(join(process.cwd(), 'node_modules/pdfjs-dist/wasm/')).href;
 
 // Long-edge target size in pixels. Large enough for a vision model to read
 // normal body text reliably (confirmed directly: a 1600px-wide render of a
@@ -40,7 +76,7 @@ export async function rasterizePdfPage(buffer: Buffer, pageNumber: number): Prom
   // thread automatically rather than spinning up a Worker — the same
   // "just works in Node" behavior pdf-parse's own bundled pdfjs copy
   // already relies on for text extraction.
-  const loadingTask = getDocument({ data: new Uint8Array(buffer), useSystemFonts: false });
+  const loadingTask = getDocument({ data: new Uint8Array(buffer), useSystemFonts: false, wasmUrl: PDFJS_WASM_URL });
   const pdf = await loadingTask.promise;
   try {
     const page = await pdf.getPage(pageNumber);
