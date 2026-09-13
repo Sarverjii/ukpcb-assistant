@@ -13,9 +13,11 @@
 // image the same way the dommatrix polyfill in textExtraction.ts was
 // chosen for being a pure-JS/portable dependency over anything needing a
 // real browser/DOM environment.
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { logAuditEvent } from '@/lib/audit/log';
 
 // Points pdfjs at its own bundled OpenJPEG WASM module (ships inside the
 // package already — nothing extra to install, and explicitly force-
@@ -44,12 +46,36 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 // argument must be of type string, received type number), even with
 // pdfjs-dist itself marked serverExternalPackages — the resolution call
 // site (this file) is still bundled, regardless of whether its target is.
-// process.cwd() is the project root in both local dev and a deployed
-// Vercel function, and node_modules/pdfjs-dist/wasm is guaranteed present
-// there by outputFileTracingIncludes above, so this needs no resolution
-// at all. pathToFileURL (not a hand-built file:// string) correctly
-// percent-encodes a path containing spaces.
-const PDFJS_WASM_URL = pathToFileURL(join(process.cwd(), 'node_modules/pdfjs-dist/wasm/')).href;
+// process.cwd() should be the project root in both local dev and a
+// deployed Vercel function, with node_modules/pdfjs-dist/wasm guaranteed
+// present there by outputFileTracingIncludes above — but this is the
+// one link in the chain not yet confirmed directly against the REAL
+// deployed function (only against a local build), so it tries a couple of
+// plausible layouts and self-reports which (if any) actually has the file,
+// via the app's own audit log — the only window available into a deployed
+// function's real filesystem from here — rather than assuming silently.
+// pathToFileURL (not a hand-built file:// string) correctly percent-
+// encodes a path containing spaces.
+function resolvePdfjsWasmDir(): string {
+  const candidates = [join(process.cwd(), 'node_modules/pdfjs-dist/wasm'), join(process.cwd(), '.next/server/node_modules/pdfjs-dist/wasm')];
+  const found = candidates.find((dir) => existsSync(join(dir, 'openjpeg.wasm')));
+  if (!found) {
+    // Fire-and-forget — this runs at module load time, nothing to await
+    // onto, and audit logging already never throws (see logAuditEvent's
+    // own comment).
+    void logAuditEvent({
+      action: 'DOCUMENT_PROCESSED',
+      result: 'ERROR',
+      metadata: {
+        error: 'pdfjs-dist wasm directory not found at any expected path — JPEG2000-compressed scanned pages will render blank.',
+        cwd: process.cwd(),
+        candidatesChecked: candidates,
+      },
+    });
+  }
+  return found ?? candidates[0];
+}
+const PDFJS_WASM_URL = pathToFileURL(resolvePdfjsWasmDir() + '/').href;
 
 // Long-edge target size in pixels. Large enough for a vision model to read
 // normal body text reliably (confirmed directly: a 1600px-wide render of a
