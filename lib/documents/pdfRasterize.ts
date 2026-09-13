@@ -128,7 +128,28 @@ export async function rasterizePdfPage(buffer: Buffer, pageNumber: number): Prom
     // satisfy the `canvas` property's type, but its 2D context is API-
     // compatible with what pdfjs actually draws through.
     await page.render({ canvas: null, canvasContext: ctx, viewport }).promise;
-    return canvas.toBuffer('image/png');
+    const png = canvas.toBuffer('image/png');
+    // A blank (or near-blank) render — the JPX-decode-fails-silently
+    // failure mode this file exists to fix, see PDFJS_WASM_URL's own
+    // comment — comes back around 11KB for a full-page scan; genuine
+    // content has consistently been 500KB+ in every case measured so
+    // far. Logged (not thrown: a blank OCR page is still just a page
+    // missing content, not a reason to fail the whole document) so an
+    // actual production occurrence — as opposed to the WASM path being
+    // resolved correctly per resolvePdfjsWasmDir's own diagnostic —
+    // is directly visible rather than inferred from a downstream "No
+    // extractable text" a few steps later.
+    if (png.length < 50_000) {
+      void logAuditEvent({
+        action: 'DOCUMENT_PROCESSED',
+        result: 'ERROR',
+        metadata: {
+          error: `rasterizePdfPage produced a suspiciously small (likely blank) image for page ${pageNumber} — ${png.length} bytes.`,
+          wasmUrl: PDFJS_WASM_URL,
+        },
+      });
+    }
+    return png;
   } finally {
     await pdf.destroy();
   }
