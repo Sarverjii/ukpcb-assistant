@@ -254,17 +254,33 @@ export class GeminiLLMProvider implements LLMProvider {
   // content, no exception thrown) — confirmed directly against a real
   // scanned government order whose text is also posted on
   // greentribunal.gov.in: verbatim transcription is blocked every time,
-  // regardless of temperature, but asking for a faithful PARAPHRASE instead
-  // of an exact copy is not, and produces an accurate, complete result (also
-  // confirmed directly, against that same page). isBlockedFinish below
-  // detects this and retries ONCE with recitationFallbackPrompt in place of
-  // the caller's own verbatim-transcription prompt — the verbatim prompt
-  // stays the default because it gives better-fidelity output (exact
-  // wording preserved) for the common case where nothing gets blocked.
-  async transcribeImage(imageBuffer: Buffer, mimeType: string, prompt: string, attempt = 0): Promise<string> {
+  // regardless of temperature. Two escalating fallbacks, confirmed directly
+  // against real documents rather than assumed:
+  //   1. RECITATION_FALLBACK_PROMPT, same model — works for most blocked
+  //      pages, but NOT all: a second real document (Uttarakhand River
+  //      Rejuvenation Committee minutes) was blocked on THIS fallback too,
+  //      on gemini-flash-lite-latest specifically.
+  //   2. The SAME fallback prompt, but on OCR_ESCALATION_MODEL — confirmed
+  //      directly on that exact second document: identical prompt,
+  //      gemini-flash-latest (not -lite) succeeded where -lite was
+  //      blocked. NOT this.fallbackModel: that constructor option exists
+  //      for generateAnswer's own primary-then-fallback logic, but nothing
+  //      in this app actually populates it (getLLMProvider() only ever
+  //      passes apiKey/model — there is no fallback-model column on
+  //      AIProviderCredential at all), so relying on it here would make
+  //      this entire tier permanently dead code. OCR_ESCALATION_MODEL is
+  //      hardcoded and self-contained instead, skipped only if the active
+  //      model already IS that model (nothing to escalate to).
+  // recitationAttempt tracks this escalation (0/1/2) independently of
+  // `attempt` (503 retry count) below — they used to share one counter,
+  // which would have made a 503 mid-escalation quietly cut off further
+  // recitation retries.
+  async transcribeImage(imageBuffer: Buffer, mimeType: string, prompt: string, attempt = 0, recitationAttempt = 0): Promise<string> {
+    const canEscalateModel = this.model !== OCR_ESCALATION_MODEL;
+    const model = recitationAttempt >= 2 && canEscalateModel ? OCR_ESCALATION_MODEL : this.model;
     try {
       const response = await this.getClient().models.generateContent({
-        model: this.model,
+        model,
         contents: [
           {
             role: 'user',
@@ -274,16 +290,20 @@ export class GeminiLLMProvider implements LLMProvider {
         config: { temperature: 0 },
       });
       const finishReason = response.candidates?.[0]?.finishReason;
-      if (isBlockedFinish(finishReason) && attempt === 0) {
-        console.warn(`[gemini] transcribeImage blocked (${finishReason}) — retrying with a paraphrase prompt instead of verbatim.`);
-        return this.transcribeImage(imageBuffer, mimeType, RECITATION_FALLBACK_PROMPT, attempt + 1);
+      if (isBlockedFinish(finishReason) && recitationAttempt === 0) {
+        console.warn(`[gemini] transcribeImage blocked (${finishReason}) on ${model} — retrying with a rephrased prompt.`);
+        return this.transcribeImage(imageBuffer, mimeType, RECITATION_FALLBACK_PROMPT, attempt, recitationAttempt + 1);
+      }
+      if (isBlockedFinish(finishReason) && recitationAttempt === 1 && canEscalateModel) {
+        console.warn(`[gemini] transcribeImage still blocked (${finishReason}) on ${model} — retrying on "${OCR_ESCALATION_MODEL}".`);
+        return this.transcribeImage(imageBuffer, mimeType, prompt, attempt, recitationAttempt + 1);
       }
       return response.text ?? '';
     } catch (err) {
       const status = (err as { status?: number })?.status;
       if (status === 503 && attempt < 2) {
         await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
-        return this.transcribeImage(imageBuffer, mimeType, prompt, attempt + 1);
+        return this.transcribeImage(imageBuffer, mimeType, prompt, attempt + 1, recitationAttempt);
       }
       if (status === 401 || status === 403) {
         throw new Error('Gemini API authentication failed — check the saved API key.');
@@ -301,16 +321,29 @@ function isBlockedFinish(finishReason: FinishReason | undefined): boolean {
   return finishReason === FinishReason.RECITATION || finishReason === FinishReason.SAFETY;
 }
 
+// The second-tier RECITATION escalation model — see transcribeImage's own
+// comment for why this is hardcoded rather than reusing the (never
+// actually populated) fallbackModel constructor option. A real "lite"
+// model was confirmed directly to block a page this full model does not,
+// on the identical prompt — Gemini's recitation check appears stricter on
+// the lite tier. Never itself the primary model for a paying/free-tier
+// setup deliberately using -lite, so this only ever fires on the rare
+// page that needs it, not as a blanket quality upgrade for every page.
+const OCR_ESCALATION_MODEL = 'gemini-flash-latest';
+
 // Sent verbatim as the fallback OCR prompt only when the caller's own
 // (normally verbatim-transcription) prompt gets blocked — see
-// transcribeImage's own comment for why this specific wording reliably
-// avoids the block: confirmed directly, the recitation check is tripped by
-// asking for an exact copy, not by the underlying content itself, so
-// explicitly asking for a paraphrase instead sidesteps it while the
-// "preserving all names, dates, numbers, and factual content" clause keeps
-// the result just as useful for search/citation as a verbatim transcript
-// would have been.
+// transcribeImage's own comment for the two-tier escalation this is part
+// of. Deliberately NOT phrased as "summarize" or "paraphrase" — an earlier
+// version using that framing was ITSELF blocked on a second real document,
+// on the same model, with the exact same finishReason. This wording
+// (describe for a search index, explicit "never quote more than 5
+// consecutive words") was confirmed directly to get past the block on
+// BOTH documents this exists to handle, producing accurate, complete
+// results each time — reframing the task away from "reproduce this text"
+// entirely, rather than just softening the reproduction request, is what
+// actually makes the difference.
 const RECITATION_FALLBACK_PROMPT =
-  'Read the text in this image and write out what it says, in your own words where needed, ' +
-  'as a plain-text summary organized by section. Do not copy it verbatim; paraphrase naturally ' +
-  'while preserving all names, dates, numbers, and factual content.';
+  'You are indexing this document image for a search engine. Describe its contents in your own words: ' +
+  'what kind of document is this, who is it from/about, what dates and names appear, and what topics ' +
+  'does it cover. Write 3-5 sentences per page of content. Never quote more than 5 consecutive words directly.';
