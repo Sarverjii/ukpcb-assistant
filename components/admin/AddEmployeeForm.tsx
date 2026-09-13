@@ -4,6 +4,7 @@ import { useState, useRef, useTransition } from 'react';
 import { createEmployeeAction } from '@/app/(app)/admin/employees/actions';
 import { EmailPreviewModal } from '@/components/admin/EmailPreviewModal';
 import { DepartmentPicker, type PickableDepartment } from '@/components/shared/DepartmentPicker';
+import { SingleSelect } from '@/components/shared/SingleSelect';
 import type { ComposedEmail } from '@/lib/employees/emailCompose';
 
 type Role = { id: string; name: string; hierarchyRank: number };
@@ -13,16 +14,22 @@ export function AddEmployeeForm({ roles, departments }: { roles: Role[]; departm
   const [error, setError] = useState<string | null>(null);
   const [previewEmail, setPreviewEmail] = useState<ComposedEmail | null>(null);
   const [departmentIds, setDepartmentIds] = useState<string[]>([]);
+  const [roleId, setRoleId] = useState('');
   const [pending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    if (!roleId) {
+      setError('Select a role.');
+      return;
+    }
     const formData = new FormData(e.currentTarget);
-    // DepartmentPicker isn't a native form element — its selection is
-    // appended manually rather than relying on FormData's automatic
-    // collection of named inputs.
+    // Neither DepartmentPicker nor SingleSelect (roleId, just below) is a
+    // native form element — their selections are appended manually rather
+    // than relying on FormData's automatic collection of named inputs.
+    formData.set('roleId', roleId);
     for (const id of departmentIds) formData.append('departmentIds', id);
     startTransition(async () => {
       const result = await createEmployeeAction(formData);
@@ -33,6 +40,7 @@ export function AddEmployeeForm({ roles, departments }: { roles: Role[]; departm
       if (result.email) setPreviewEmail(result.email);
       formRef.current?.reset();
       setDepartmentIds([]);
+      setRoleId('');
     });
   }
 
@@ -61,21 +69,12 @@ export function AddEmployeeForm({ roles, departments }: { roles: Role[]; departm
             required
             className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm"
           />
-          <select
-            name="roleId"
-            required
-            defaultValue=""
-            className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm"
-          >
-            <option value="" disabled>
-              Select a role…
-            </option>
-            {roles.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
+          <SingleSelect
+            value={roleId}
+            onChange={setRoleId}
+            options={[{ value: '', label: 'Select a role…' }, ...roles.map((r) => ({ value: r.id, label: r.name }))]}
+            triggerClassName="flex w-full items-center justify-between gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+          />
           <DepartmentPicker
             departments={departments}
             selectedIds={departmentIds}

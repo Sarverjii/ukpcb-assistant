@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Files, Globe, ExternalLink, ChevronDown } from 'lucide-react';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
+import { SingleSelect } from '@/components/shared/SingleSelect';
 
 export type LibraryDocument = {
   id: string;
@@ -120,32 +121,18 @@ export function DocumentLibraryTable({
               className="w-full max-w-xs rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm outline-none focus:border-brand-500"
             />
             {isAdmin && (
-              <select
+              <SingleSelect
                 value={clearanceFilter}
-                onChange={(e) => setClearanceFilter(e.target.value)}
-                className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
-              >
-                <option value="ALL">All clearances</option>
-                {roles.map((r) => (
-                  <option key={r.hierarchyRank} value={r.hierarchyRank}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
+                onChange={setClearanceFilter}
+                options={[{ value: 'ALL', label: 'All clearances' }, ...roles.map((r) => ({ value: String(r.hierarchyRank), label: r.name }))]}
+              />
             )}
             {isAdmin && departments.length > 0 && (
-              <select
+              <SingleSelect
                 value={departmentFilter}
-                onChange={(e) => setDepartmentFilter(e.target.value)}
-                className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
-              >
-                <option value="ALL">All departments</option>
-                {departments.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
+                onChange={setDepartmentFilter}
+                options={[{ value: 'ALL', label: 'All departments' }, ...departments.map((d) => ({ value: d.id, label: d.name }))]}
+              />
             )}
             <span className="text-xs text-zinc-400">
               {filtered.length} of {fileDocuments.length}

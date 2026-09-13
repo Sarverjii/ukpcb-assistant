@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import { Link2, Loader2 } from 'lucide-react';
 import { addDocumentFromUrlAction } from '@/app/(app)/knowledge-base/actions';
+import { SingleSelect } from '@/components/shared/SingleSelect';
 
 /**
  * "Add from a URL" — a deliberately separate, much simpler form from
@@ -102,15 +103,15 @@ export function UrlUploadForm() {
           {crawl && (
             <label className="ml-6 flex items-center gap-2 text-sm">
               <span className="text-zinc-700 dark:text-zinc-300">Crawl depth</span>
-              <select
+              <SingleSelect
                 value={crawlDepth}
-                onChange={(e) => setCrawlDepth(e.target.value)}
-                className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-sm"
-              >
-                <option value="1">1 — pages linked directly from this one</option>
-                <option value="2">2 — and pages linked from those</option>
-                <option value="3">3 — and one hop further still</option>
-              </select>
+                onChange={setCrawlDepth}
+                options={[
+                  { value: '1', label: '1 — pages linked directly from this one' },
+                  { value: '2', label: '2 — and pages linked from those' },
+                  { value: '3', label: '3 — and one hop further still' },
+                ]}
+              />
             </label>
           )}
           <div>

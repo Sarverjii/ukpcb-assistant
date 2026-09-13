@@ -16,6 +16,7 @@ import { ACCEPTED_EXTENSIONS } from '@/lib/documents/uploadClient';
 import { DepartmentCheckboxList } from '@/components/shared/DepartmentCheckboxList';
 import { ClearanceLevelPicker } from '@/components/shared/ClearanceLevelPicker';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
+import { SingleSelect } from '@/components/shared/SingleSelect';
 import { isDailyQuotaError, isRateLimitError } from '@/lib/ai/errors';
 
 export type DocumentRow = {
@@ -176,42 +177,28 @@ export function DocumentsTable({
           placeholder="Search by document name…"
           className="w-full max-w-xs rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm outline-none focus:border-brand-500"
         />
-        <select
+        <SingleSelect
           value={clearanceFilter}
-          onChange={(e) => setClearanceFilter(e.target.value)}
-          className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
-        >
-          <option value="ALL">All clearances</option>
-          {roles.map((r) => (
-            <option key={r.hierarchyRank} value={r.hierarchyRank}>
-              {r.name}
-            </option>
-          ))}
-        </select>
-        <select
+          onChange={setClearanceFilter}
+          options={[{ value: 'ALL', label: 'All clearances' }, ...roles.map((r) => ({ value: String(r.hierarchyRank), label: r.name }))]}
+        />
+        <SingleSelect
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
-        >
-          <option value="ALL">All statuses</option>
-          <option value="PENDING">Pending</option>
-          <option value="PROCESSING">Processing</option>
-          <option value="READY">Ready</option>
-          <option value="FAILED">Failed</option>
-        </select>
+          onChange={setStatusFilter}
+          options={[
+            { value: 'ALL', label: 'All statuses' },
+            { value: 'PENDING', label: 'Pending' },
+            { value: 'PROCESSING', label: 'Processing' },
+            { value: 'READY', label: 'Ready' },
+            { value: 'FAILED', label: 'Failed' },
+          ]}
+        />
         {departments.length > 0 && (
-          <select
+          <SingleSelect
             value={departmentFilter}
-            onChange={(e) => setDepartmentFilter(e.target.value)}
-            className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
-          >
-            <option value="ALL">All departments</option>
-            {departments.map((dept) => (
-              <option key={dept.id} value={dept.id}>
-                {dept.name}
-              </option>
-            ))}
-          </select>
+            onChange={setDepartmentFilter}
+            options={[{ value: 'ALL', label: 'All departments' }, ...departments.map((dept) => ({ value: dept.id, label: dept.name }))]}
+          />
         )}
         <span className="text-xs text-zinc-400">
           {filtered.length} of {documents.length}

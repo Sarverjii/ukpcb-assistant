@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Search } from 'lucide-react';
+import { SingleSelect } from '@/components/shared/SingleSelect';
 
 const RESULTS = ['SUCCESS', 'DENIED', 'ERROR'];
 
@@ -39,30 +40,16 @@ export function AuditLogFilters({ actions }: { actions: string[] }) {
           className="w-full max-w-xs rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 py-1.5 pl-7 pr-3 text-sm outline-none focus:border-brand-500"
         />
       </form>
-      <select
+      <SingleSelect
         value={searchParams.get('action') ?? ''}
-        onChange={(e) => updateParam('action', e.target.value)}
-        className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
-      >
-        <option value="">All actions</option>
-        {actions.map((a) => (
-          <option key={a} value={a}>
-            {a}
-          </option>
-        ))}
-      </select>
-      <select
+        onChange={(v) => updateParam('action', v)}
+        options={[{ value: '', label: 'All actions' }, ...actions.map((a) => ({ value: a, label: a }))]}
+      />
+      <SingleSelect
         value={searchParams.get('result') ?? ''}
-        onChange={(e) => updateParam('result', e.target.value)}
-        className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
-      >
-        <option value="">All results</option>
-        {RESULTS.map((r) => (
-          <option key={r} value={r}>
-            {r}
-          </option>
-        ))}
-      </select>
+        onChange={(v) => updateParam('result', v)}
+        options={[{ value: '', label: 'All results' }, ...RESULTS.map((r) => ({ value: r, label: r }))]}
+      />
       <label className="flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-300">
         <input
           type="checkbox"

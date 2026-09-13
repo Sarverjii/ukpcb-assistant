@@ -14,6 +14,7 @@ import { LocalTime } from '@/components/admin/LocalTime';
 import { ReauthDialog } from '@/components/admin/ReauthDialog';
 import { EmailPreviewModal } from '@/components/admin/EmailPreviewModal';
 import { DepartmentPicker, type PickableDepartment } from '@/components/shared/DepartmentPicker';
+import { SingleSelect } from '@/components/shared/SingleSelect';
 import { Avatar } from '@/components/shared/Avatar';
 import { RowActionsMenu } from '@/components/shared/RowActionsMenu';
 import type { ComposedEmail } from '@/lib/employees/emailCompose';
@@ -96,27 +97,20 @@ export function EmployeesTable({
           placeholder="Search by name or email…"
           className="w-full max-w-xs rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm outline-none focus:border-brand-500"
         />
-        <select
+        <SingleSelect
           value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value)}
-          className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
-        >
-          <option value="ALL">All roles</option>
-          {roles.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.name}
-            </option>
-          ))}
-        </select>
-        <select
+          onChange={setRoleFilter}
+          options={[{ value: 'ALL', label: 'All roles' }, ...roles.map((r) => ({ value: r.id, label: r.name }))]}
+        />
+        <SingleSelect
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
-        >
-          <option value="ALL">All statuses</option>
-          <option value="ACTIVE">Active</option>
-          <option value="DISABLED">Disabled</option>
-        </select>
+          onChange={setStatusFilter}
+          options={[
+            { value: 'ALL', label: 'All statuses' },
+            { value: 'ACTIVE', label: 'Active' },
+            { value: 'DISABLED', label: 'Disabled' },
+          ]}
+        />
         <span className="ml-auto text-xs text-zinc-400">
           {filtered.length} of {users.length}
         </span>
@@ -179,14 +173,19 @@ function EmployeeRow({
   const [limitInput, setLimitInput] = useState(
     user.dailyMessageLimitOverride === null ? '' : String(user.dailyMessageLimitOverride),
   );
+  const [roleId, setRoleId] = useState(user.roleId);
   const roleDefault = roles.find((r) => r.id === user.roleId)?.defaultDailyMessageLimit ?? null;
 
-  function handleRoleChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const roleId = e.target.value;
+  function handleRoleChange(newRoleId: string) {
+    const previous = roleId;
+    setRoleId(newRoleId);
     setError(null);
     startTransition(async () => {
-      const result = await changeEmployeeRoleAction(user.id, roleId);
-      if (result.error) setError(result.error);
+      const result = await changeEmployeeRoleAction(user.id, newRoleId);
+      if (result.error) {
+        setError(result.error);
+        setRoleId(previous); // revert the optimistic update, same as handleDepartmentsChange below
+      }
     });
   }
 
@@ -258,18 +257,13 @@ function EmployeeRow({
         />
       </td>
       <td className="px-4 py-3">
-        <select
-          defaultValue={user.roleId}
-          disabled={isSelf || pending}
+        <SingleSelect
+          value={roleId}
           onChange={handleRoleChange}
-          className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-xs disabled:opacity-50"
-        >
-          {roles.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.name}
-            </option>
-          ))}
-        </select>
+          disabled={isSelf || pending}
+          options={roles.map((r) => ({ value: r.id, label: r.name }))}
+          triggerClassName="flex items-center justify-between gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-brand-500"
+        />
       </td>
       <td className="px-4 py-3">
         <input

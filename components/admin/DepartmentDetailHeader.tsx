@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Pencil, Check, X, Layers, Trash2 } from 'lucide-react';
 import { updateDepartmentAction, deleteDepartmentAction } from '@/app/(app)/admin/departments/actions';
 import { TileIcon } from '@/components/shared/Avatar';
+import { SingleSelect } from '@/components/shared/SingleSelect';
 
 type Member = { id: string; name: string };
 
@@ -184,18 +185,12 @@ export function DepartmentDetailHeader({
       </label>
       <label className="flex flex-col gap-1.5 text-sm">
         <span className="font-medium text-zinc-700 dark:text-zinc-300">Head</span>
-        <select
+        <SingleSelect
           value={headValue}
-          onChange={(e) => setHeadValue(e.target.value)}
-          className="rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm"
-        >
-          <option value="">No head set</option>
-          {members.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.name}
-            </option>
-          ))}
-        </select>
+          onChange={setHeadValue}
+          options={[{ value: '', label: 'No head set' }, ...members.map((m) => ({ value: m.id, label: m.name }))]}
+          triggerClassName="flex w-full items-center justify-between gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+        />
         {members.length === 0 && (
           <span className="text-xs text-zinc-400">Add a member below before you can set a head.</span>
         )}
