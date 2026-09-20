@@ -15,7 +15,8 @@ import { Link2, ChevronUp, ChevronDown, ChevronsUpDown, RotateCw } from 'lucide-
 import { LocalTime } from '@/components/admin/LocalTime';
 import { ACCEPTED_EXTENSIONS } from '@/lib/documents/uploadClient';
 import { DepartmentCheckboxList } from '@/components/shared/DepartmentCheckboxList';
-import { LocationPicker, type PickableLocation } from '@/components/shared/LocationPicker';
+import { LocationCheckboxList } from '@/components/shared/LocationCheckboxList';
+import type { PickableLocation } from '@/components/shared/LocationPicker';
 import { ClearanceLevelPicker } from '@/components/shared/ClearanceLevelPicker';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
 import { SingleSelect } from '@/components/shared/SingleSelect';
@@ -420,8 +421,8 @@ function DocumentRow({
           disabled={pending}
         />
       </td>
-      <td className="px-3 py-2 min-w-[12rem]">
-        <LocationPicker
+      <td className="px-3 py-2 min-w-[16rem]">
+        <LocationCheckboxList
           locations={locations}
           selectedIds={locationIds}
           onChange={handleLocationsChange}
