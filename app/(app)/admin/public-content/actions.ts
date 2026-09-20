@@ -14,7 +14,9 @@ import {
 } from '@/lib/db/queries/documents';
 import { getStorageProvider } from '@/lib/documents/storage';
 import { SUPPORTED_MIME_TYPES } from '@/lib/documents/textExtraction';
-import { fetchUrlForIngestion, UrlFetchError } from '@/lib/documents/urlFetch';
+import { UrlFetchError, type FetchedPage } from '@/lib/documents/urlFetch';
+import { crawlSite, MAX_CRAWL_DEPTH } from '@/lib/documents/siteCrawl';
+import { getCrawlSite, upsertCrawlSite, touchCrawlSite, updateCrawlSiteDepth } from '@/lib/db/queries/crawlSites';
 import { processDocument } from '@/lib/documents/pipeline';
 import { config } from '@/lib/config';
 
@@ -37,31 +39,16 @@ const PUBLIC_CONTENT_PATH = '/admin/public-content';
 const PUBLIC_CLEARANCE_LEVEL = 0;
 
 /**
- * Adds one public page by URL — the "mainly URLs" half of this feature.
- * Deliberately no crawl mode (unlike addDocumentFromUrlAction in the main
- * Knowledge Base): Public Content is meant to be a small, deliberately
- * curated set an admin adds one page at a time, not a bulk import surface.
+ * Saves one already-fetched page as a public Document — the crawl and
+ * single-page paths both do this per page, exactly mirroring the main
+ * Knowledge Base's own saveFetchedPageAsDocument, minus the clearance/
+ * department/location a public document doesn't carry. Deliberately does
+ * NOT trigger processing itself — a crawl can create several documents in
+ * one request, and processing (which calls the embedding API) needs to
+ * happen for them ONE AT A TIME, not N independent after() callbacks
+ * racing each other (see processDocumentsSequentially below).
  */
-export async function addPublicUrlAction(formData: FormData): Promise<ActionResult> {
-  const ctx = await getAuthContext();
-  await requireAdmin(ctx);
-
-  const url = String(formData.get('url') ?? '').trim();
-  if (!url) return { error: 'A URL is required.' };
-
-  const existingUrls = await listIngestedSourceUrls(true);
-  if (existingUrls.includes(url)) {
-    return { error: 'This page is already in the knowledge base.' };
-  }
-
-  let page;
-  try {
-    page = await fetchUrlForIngestion(url);
-  } catch (err) {
-    if (err instanceof UrlFetchError) return { error: err.message };
-    throw err;
-  }
-
+async function saveFetchedPublicPageAsDocument(page: FetchedPage, url: string, uploadedById: string): Promise<string> {
   const name = page.title || url;
   const buffer = Buffer.from(page.html, 'utf-8');
   const storage = getStorageProvider();
@@ -75,25 +62,143 @@ export async function addPublicUrlAction(formData: FormData): Promise<ActionResu
     fileSizeBytes: buffer.byteLength,
     clearanceLevel: PUBLIC_CLEARANCE_LEVEL,
     locationIds: [],
-    uploadedById: ctx.userId,
+    uploadedById,
     sourceUrl: url,
     isPublic: true,
   });
+
+  return document.id;
+}
+
+/** Same reasoning as the main Knowledge Base's own processDocumentsSequentially — see that function's comment. */
+async function processDocumentsSequentially(documentIds: string[]): Promise<void> {
+  for (const id of documentIds) {
+    try {
+      await processDocument(id);
+    } catch (err) {
+      console.error('[public-content] processing failed', id, err);
+    }
+  }
+}
+
+/**
+ * Adds one public page by URL — with an optional crawl, same shape and
+ * same shared engine (lib/documents/siteCrawl.ts) as the main Knowledge
+ * Base's addDocumentFromUrlAction, just tagging every page public instead
+ * of with clearance/department/location.
+ */
+export async function addPublicUrlAction(formData: FormData): Promise<ActionResult & { pagesAdded?: number }> {
+  const ctx = await getAuthContext();
+  await requireAdmin(ctx);
+
+  const url = String(formData.get('url') ?? '').trim();
+  const crawl = formData.get('crawl') === 'true';
+  const crawlDepth = Math.min(Math.max(Number(formData.get('crawlDepth') ?? 1) || 1, 1), MAX_CRAWL_DEPTH);
+  if (!url) return { error: 'A URL is required.' };
+
+  let rootUrl: URL;
+  try {
+    rootUrl = new URL(url);
+  } catch {
+    return { error: "That doesn't look like a valid URL." };
+  }
+
+  const existingUrls = await listIngestedSourceUrls(true);
+
+  let documentIds: string[];
+  try {
+    const result = await crawlSite({
+      rootUrl: url,
+      depth: crawl ? crawlDepth : 0,
+      alreadySeenUrls: new Set(existingUrls),
+      saveDocument: (page, pageUrl) => saveFetchedPublicPageAsDocument(page, pageUrl, ctx.userId),
+    });
+    documentIds = result.documentIds;
+  } catch (err) {
+    if (err instanceof UrlFetchError) return { error: err.message };
+    throw err;
+  }
+
+  if (documentIds.length === 0) {
+    return {
+      error: crawl
+        ? 'This page and everything crawlable from it are already in the public content.'
+        : 'This page is already in the public content.',
+    };
+  }
+
+  if (crawl) {
+    await upsertCrawlSite({ domain: rootUrl.hostname, rootUrl: url, depth: crawlDepth, isPublic: true, uploadedById: ctx.userId });
+  }
 
   await logAuditEvent({
     action: 'DOCUMENT_ADDED_FROM_URL',
     result: 'SUCCESS',
     userId: ctx.userId,
-    resource: document.id,
-    metadata: { url, public: true },
+    resource: rootUrl.hostname,
+    metadata: { url, public: true, crawl, crawlDepth, pagesAdded: documentIds.length },
   });
 
-  after(() =>
-    processDocument(document.id).catch((err) => {
-      console.error('[public-content] processing failed', document.id, err);
-    }),
-  );
+  after(() => processDocumentsSequentially(documentIds));
 
+  revalidatePath(PUBLIC_CONTENT_PATH);
+  return { pagesAdded: documentIds.length };
+}
+
+/** Public-content counterpart of reprocessCrawlSiteAction (main Knowledge Base) — see that action's own comment. */
+export async function reprocessPublicCrawlSiteAction(crawlSiteId: string): Promise<ActionResult & { pagesAdded?: number }> {
+  const ctx = await getAuthContext();
+  await requireAdmin(ctx);
+
+  const site = await getCrawlSite(crawlSiteId);
+  if (!site.isPublic) return { error: 'This site belongs to the Knowledge Base, not Public Content.' };
+
+  const existingUrls = await listIngestedSourceUrls(true);
+
+  let documentIds: string[];
+  try {
+    const result = await crawlSite({
+      rootUrl: site.rootUrl,
+      depth: site.depth,
+      alreadySeenUrls: new Set(existingUrls),
+      saveDocument: (page, pageUrl) => saveFetchedPublicPageAsDocument(page, pageUrl, ctx.userId),
+    });
+    documentIds = result.documentIds;
+  } catch (err) {
+    if (err instanceof UrlFetchError) return { error: err.message };
+    throw err;
+  }
+
+  await touchCrawlSite(crawlSiteId);
+
+  if (documentIds.length > 0) {
+    await logAuditEvent({
+      action: 'DOCUMENT_ADDED_FROM_URL',
+      result: 'SUCCESS',
+      userId: ctx.userId,
+      resource: site.domain,
+      metadata: { url: site.rootUrl, public: true, crawl: true, crawlDepth: site.depth, pagesAdded: documentIds.length, reprocessed: true },
+    });
+    after(() => processDocumentsSequentially(documentIds));
+  }
+
+  revalidatePath(PUBLIC_CONTENT_PATH);
+  return { pagesAdded: documentIds.length };
+}
+
+/** Public-content counterpart of updateCrawlSiteDepthAction (main Knowledge Base). */
+export async function updatePublicCrawlSiteDepthAction(crawlSiteId: string, depth: number): Promise<ActionResult> {
+  const ctx = await getAuthContext();
+  await requireAdmin(ctx);
+
+  if (!Number.isInteger(depth) || depth < 1 || depth > MAX_CRAWL_DEPTH) {
+    return { error: `Depth must be a whole number from 1 to ${MAX_CRAWL_DEPTH}.` };
+  }
+
+  const site = await getCrawlSite(crawlSiteId);
+  if (!site.isPublic) return { error: 'This site belongs to the Knowledge Base, not Public Content.' };
+
+  await updateCrawlSiteDepth(crawlSiteId, depth);
   revalidatePath(PUBLIC_CONTENT_PATH);
   return {};
 }

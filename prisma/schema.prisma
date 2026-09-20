@@ -170,6 +170,7 @@ model User {
   sessions                     Session[]
   loginSessions                LoginSession[]
   documents                    Document[]             @relation("UploadedBy")
+  crawlSites                   CrawlSite[]            @relation("CrawlSiteUploadedBy")
   conversations                Conversation[]
   auditLogs                    AuditLog[]
   importedBatches              EmployeeImportBatch[]  @relation("ImportedBy")
@@ -436,6 +437,46 @@ model Document {
 
   @@index([clearanceLevel])
   @@index([uploadedById])
+}
+
+// One row per (domain, isPublic) that a "crawl this site" URL-add has ever
+// touched — the record "Process again" (lib/documents/siteCrawl.ts) reads
+// to re-run the exact same crawl without the admin re-pasting the URL, and
+// what the Websites view (WebsiteGroups.tsx, shared by the main Knowledge
+// Base and Admin -> Public Content) reads to show each site's configured
+// depth and when it was last crawled. `isPublic` mirrors Document.isPublic
+// — the SAME domain can legitimately have two independent crawl configs,
+// one per pool, since they're managed by entirely separate admin flows
+// (see Document.isPublic's own comment). Deliberately NOT a record of
+// every page ever discovered (no persisted frontier/queue) — a fresh
+// crawl always restarts from rootUrl and walks the live link graph again;
+// pages already ingested (found via the isPublic-scoped
+// listIngestedSourceUrls) are simply never re-fetched or re-saved. This
+// keeps "process any link that were not processed" self-healing across
+// runs without needing its own separate queue table: a page discovered
+// but not reached before a run's page cap ran out just gets rediscovered,
+// the same way, on the next "Process again".
+model CrawlSite {
+  id           String   @id @default(cuid())
+  domain       String
+  // The exact URL originally pasted to start this site's crawl — always
+  // re-fetched first on every "Process again" run, both to pick up
+  // whatever's newly linked from it and (if it wasn't already ingested
+  // for this pool) to ingest it again.
+  rootUrl      String
+  // How many link-hops to follow when discovering pages, same meaning as
+  // addDocumentFromUrlAction's own crawlDepth — stored so "Process again"
+  // reuses it without the admin re-entering it, and editable in place from
+  // the Websites view without needing to re-paste the URL.
+  depth        Int
+  isPublic     Boolean  @default(false)
+  uploadedById String?
+  uploadedBy   User?    @relation("CrawlSiteUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  lastCrawledAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  @@unique([domain, isPublic])
+  @@index([isPublic])
 }
 
 model DocumentChunk {

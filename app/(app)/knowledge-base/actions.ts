@@ -26,7 +26,9 @@ import {
 } from '@/lib/db/queries/chunks';
 import { getStorageProvider } from '@/lib/documents/storage';
 import { SUPPORTED_MIME_TYPES } from '@/lib/documents/textExtraction';
-import { fetchUrlForIngestion, discoverSameDomainLinks, UrlFetchError } from '@/lib/documents/urlFetch';
+import { fetchUrlForIngestion, UrlFetchError } from '@/lib/documents/urlFetch';
+import { crawlSite, MAX_CRAWL_DEPTH } from '@/lib/documents/siteCrawl';
+import { getCrawlSite, upsertCrawlSite, touchCrawlSite, updateCrawlSiteDepth } from '@/lib/db/queries/crawlSites';
 import { getLowestRole } from '@/lib/db/queries/roles';
 import { processDocument } from '@/lib/documents/pipeline';
 import { config } from '@/lib/config';
@@ -379,26 +381,6 @@ export async function retryDocumentAction(documentId: string): Promise<ActionRes
  * so nothing about chunking/embedding/indexing needed to be duplicated for
  * this path.
  */
-// Hard cap on how many pages one crawl request will fetch AND process,
-// root page included. Kept deliberately small: processDocumentsSequentially
-// (below) processes every page's embeddings one at a time within this
-// same request's after() callback, which still shares the 60s maxDuration
-// every admin action here does. Confirmed directly against production
-// that 6 was still too many: the root page alone (26 chunks, using the
-// slow per-text-paced fallback some embedding models need) used up
-// enough of that budget that the SECOND document's processing was cut
-// off mid-flight when Vercel killed the function for running too long —
-// left permanently stuck in PROCESSING, no error, no retry, since the
-// kill happens below where any catch block could run. 3 leaves real
-// margin. A real site can have thousands of pages; this is a "grab a
-// couple of the most important ones a human just linked you to," not a
-// full-site mirror — run "Add from a URL" again (with crawl checked)
-// from a different starting page, or add pages one at a time (crawl
-// off), to pull in more without hitting this ceiling. Applies regardless
-// of crawlDepth (below) — a deeper crawl just reaches further to try to
-// fill this same small quota, it doesn't raise it.
-const MAX_CRAWL_PAGES = 3;
-
 export type AddUrlResult = ActionResult & { pagesAdded?: number };
 
 /**
@@ -476,12 +458,15 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
   const url = String(formData.get('url') ?? '').trim();
   const crawl = formData.get('crawl') === 'true';
   // How many link-hops out from the root page to follow — 1 means only
-  // pages linked directly from the root (the original behavior), higher
-  // values also follow links found on THOSE pages, and so on. Still
-  // bounded by MAX_CRAWL_PAGES regardless — depth changes how far the
-  // crawl is willing to reach to fill that same small quota, not how
-  // many pages it can end up fetching.
-  const crawlDepth = Math.min(Math.max(Number(formData.get('crawlDepth') ?? 1) || 1, 1), 3);
+  // pages linked directly from the root, higher values also follow links
+  // found on THOSE pages, and so on. See lib/documents/siteCrawl.ts's own
+  // comment for why this is the admin-facing dial (how far to look) while
+  // MAX_NEW_PAGES_PER_CRAWL, not depth, is what actually bounds cost per
+  // request (how many of the pages found actually get fetched+processed
+  // this run) — a site bigger than that cap is expected to need repeated
+  // "Process again" clicks (reprocessCrawlSiteAction below), not one
+  // enormous crawl.
+  const crawlDepth = Math.min(Math.max(Number(formData.get('crawlDepth') ?? 1) || 1, 1), MAX_CRAWL_DEPTH);
   if (!url) return { error: 'A URL is required.' };
 
   // Per explicit request: URL-sourced content is public to every employee
@@ -516,75 +501,47 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
     return { error: "That doesn't look like a valid URL." };
   }
 
-  let rootPage;
+  // Reused as the "never re-fetch/re-save" set for both the single-page
+  // and crawl paths — a page already in the knowledge base (this exact
+  // URL, from any past crawl or single-URL add) is never duplicated into
+  // a second document. The root itself is still fetched live either way,
+  // inside crawlSite() — link discovery needs its current HTML even on a
+  // re-run where the root document itself already exists.
+  const existingUrls = await listIngestedSourceUrls(false);
+
+  let documentIds: string[];
   try {
-    rootPage = await fetchUrlForIngestion(url);
+    const result = await crawlSite({
+      rootUrl: url,
+      depth: crawl ? crawlDepth : 0,
+      alreadySeenUrls: new Set(existingUrls),
+      saveDocument: (page, pageUrl) =>
+        saveFetchedPageAsDocument(page, pageUrl, clearanceLevel, allDepartmentIds, allLocationIds, ctx.userId),
+    });
+    documentIds = result.documentIds;
   } catch (err) {
     if (err instanceof UrlFetchError) return { error: err.message };
     throw err;
   }
 
-  // Checked once, reused for both the root URL itself and crawl
-  // discovery below — a page already in the knowledge base (this exact
-  // URL, from any past crawl or single-URL add) is never re-fetched and
-  // duplicated into a second document. The root still gets fetched live
-  // either way: crawl mode needs its current HTML to discover links from,
-  // even on a re-run where the root document itself already exists.
-  const existingUrls = await listIngestedSourceUrls(false);
-  const documentIds = existingUrls.includes(url)
-    ? []
-    : [await saveFetchedPageAsDocument(rootPage, url, clearanceLevel, allDepartmentIds, allLocationIds, ctx.userId)];
-
-  // Crawl mode: same-domain pages reachable from the root page within
-  // crawlDepth hops, fetched and added the same way, up to the cap
-  // above — a breadth-first walk, one "ring" of links at a time. `seen`
-  // is seeded from every already-ingested URL (see above) so a page
-  // already in the knowledge base is never re-fetched and duplicated,
-  // and is then grown with every URL queued THIS run so a link cycle
-  // (two pages linking back to each other, or the same page linked from
-  // several others) can't cause it to be fetched twice either. A page
-  // that fails to fetch (dead link, blocked, non-HTML) is just skipped —
-  // one bad link shouldn't fail the whole crawl when most pages came
-  // through fine.
-  if (crawl && rootPage.contentType === 'text/html') {
-    const seen = new Set([url, ...existingUrls]);
-    let frontier = discoverSameDomainLinks(rootPage.html, rootUrl).filter((l) => !seen.has(l));
-    for (const l of frontier) seen.add(l);
-
-    for (let hop = 0; hop < crawlDepth && frontier.length > 0 && documentIds.length < MAX_CRAWL_PAGES; hop++) {
-      const nextFrontier: string[] = [];
-      for (const link of frontier) {
-        if (documentIds.length >= MAX_CRAWL_PAGES) break;
-        try {
-          const linkedPage = await fetchUrlForIngestion(link);
-          documentIds.push(
-            await saveFetchedPageAsDocument(linkedPage, link, clearanceLevel, allDepartmentIds, allLocationIds, ctx.userId),
-          );
-          if (linkedPage.contentType === 'text/html') {
-            for (const deeper of discoverSameDomainLinks(linkedPage.html, rootUrl)) {
-              if (!seen.has(deeper)) {
-                seen.add(deeper);
-                nextFrontier.push(deeper);
-              }
-            }
-          }
-        } catch (err) {
-          console.warn('[documents] crawl skipped a page', link, err instanceof Error ? err.message : err);
-        }
-      }
-      frontier = nextFrontier;
-    }
-  }
-
   // Nothing new to do — the root URL (and, in crawl mode, everything
-  // reachable from it) was already in the knowledge base. Not an error
-  // exactly, but there's genuinely no document to create or process.
+  // reachable from it within this run's page budget) was already in the
+  // knowledge base. Not an error exactly, but there's genuinely no
+  // document to create or process.
   if (documentIds.length === 0) {
     return {
       error: crawl
         ? 'This page and everything crawlable from it are already in the knowledge base.'
         : 'This page is already in the knowledge base.',
     };
+  }
+
+  // Remembered so "Process again" (reprocessCrawlSiteAction below) can
+  // re-run this exact crawl later without the admin re-pasting the URL —
+  // only when crawling was actually requested; a plain single-page add
+  // shouldn't turn into a trackable "site".
+  if (crawl) {
+    await upsertCrawlSite({ domain: rootUrl.hostname, rootUrl: url, depth: crawlDepth, isPublic: false, uploadedById: ctx.userId });
   }
 
   await logAuditEvent({
@@ -601,4 +558,95 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
 
   revalidatePath(KNOWLEDGE_BASE_PATH);
   return { pagesAdded: documentIds.length };
+}
+
+/**
+ * "Process again" — re-runs a previously-crawled site's exact same crawl
+ * (same rootUrl, same stored depth) to catch pages that are newly linked,
+ * or that were discovered but never reached last time because
+ * MAX_NEW_PAGES_PER_CRAWL ran out first (see siteCrawl.ts's own comment:
+ * there's no persisted queue, so those pages simply get rediscovered via
+ * the same links and processed now instead). A page already ingested
+ * (from any previous run) is never re-fetched or duplicated, so repeated
+ * clicks are always safe and always make forward progress, never redoing
+ * work.
+ */
+export async function reprocessCrawlSiteAction(crawlSiteId: string): Promise<AddUrlResult> {
+  const ctx = await getAuthContext();
+  try {
+    await requireCanUploadDocuments(ctx);
+  } catch (err) {
+    if (err instanceof ForbiddenError) return { error: err.message };
+    throw err;
+  }
+
+  const site = await getCrawlSite(crawlSiteId);
+  if (site.isPublic) return { error: 'This site belongs to Public Content, not the Knowledge Base.' };
+
+  const lowestRole = await getLowestRole();
+  if (!lowestRole) return { error: 'No roles are configured yet.' };
+  const clearanceLevel = lowestRole.hierarchyRank;
+
+  const allDepartments = await listDepartments();
+  if (allDepartments.length === 0) return { error: 'No departments are configured yet.' };
+  const allDepartmentIds = allDepartments.map((d) => d.id);
+
+  const allLocations = await listLocations();
+  if (allLocations.length === 0) return { error: 'No locations are configured yet.' };
+  const allLocationIds = allLocations.map((l) => l.id);
+
+  const existingUrls = await listIngestedSourceUrls(false);
+
+  let documentIds: string[];
+  try {
+    const result = await crawlSite({
+      rootUrl: site.rootUrl,
+      depth: site.depth,
+      alreadySeenUrls: new Set(existingUrls),
+      saveDocument: (page, pageUrl) =>
+        saveFetchedPageAsDocument(page, pageUrl, clearanceLevel, allDepartmentIds, allLocationIds, ctx.userId),
+    });
+    documentIds = result.documentIds;
+  } catch (err) {
+    if (err instanceof UrlFetchError) return { error: err.message };
+    throw err;
+  }
+
+  await touchCrawlSite(crawlSiteId);
+
+  if (documentIds.length > 0) {
+    await logAuditEvent({
+      action: 'DOCUMENT_ADDED_FROM_URL',
+      result: 'SUCCESS',
+      userId: ctx.userId,
+      resource: site.domain,
+      metadata: { url: site.rootUrl, clearanceLevel, crawl: true, crawlDepth: site.depth, pagesAdded: documentIds.length, reprocessed: true },
+    });
+    after(() => processDocumentsSequentially(documentIds));
+  }
+
+  revalidatePath(KNOWLEDGE_BASE_PATH);
+  return { pagesAdded: documentIds.length };
+}
+
+/** Lets the Websites view's inline depth editor change a tracked site's crawl depth for future "Process again" runs, without re-pasting the URL. */
+export async function updateCrawlSiteDepthAction(crawlSiteId: string, depth: number): Promise<ActionResult> {
+  const ctx = await getAuthContext();
+  try {
+    await requireCanUploadDocuments(ctx);
+  } catch (err) {
+    if (err instanceof ForbiddenError) return { error: err.message };
+    throw err;
+  }
+
+  if (!Number.isInteger(depth) || depth < 1 || depth > MAX_CRAWL_DEPTH) {
+    return { error: `Depth must be a whole number from 1 to ${MAX_CRAWL_DEPTH}.` };
+  }
+
+  const site = await getCrawlSite(crawlSiteId);
+  if (site.isPublic) return { error: 'This site belongs to Public Content, not the Knowledge Base.' };
+
+  await updateCrawlSiteDepth(crawlSiteId, depth);
+  revalidatePath(KNOWLEDGE_BASE_PATH);
+  return {};
 }

@@ -4,6 +4,13 @@ import { useState, useTransition } from 'react';
 import { Link2, Loader2 } from 'lucide-react';
 import { addDocumentFromUrlAction } from '@/app/(app)/knowledge-base/actions';
 import { SingleSelect } from '@/components/shared/SingleSelect';
+import { MAX_CRAWL_DEPTH } from '@/lib/documents/crawlConstants';
+
+const DEPTH_LABELS = ['pages linked directly from this one', 'and pages linked from those'];
+function depthLabel(n: number): string {
+  if (n <= DEPTH_LABELS.length) return DEPTH_LABELS[n - 1];
+  return `${n - 1} hops further still`;
+}
 
 /**
  * "Add from a URL" — a deliberately separate, much simpler form from
@@ -96,8 +103,10 @@ export function UrlUploadForm() {
               className="h-4 w-4 rounded border-zinc-300 dark:border-zinc-600 text-brand-600 focus:ring-brand-500"
             />
             <span className="text-zinc-700 dark:text-zinc-300">
-              Also fetch other pages linked from this one, on the same site (up to 3 total — a page
-              already in the knowledge base is never fetched twice)
+              Also crawl other pages linked from this one, on the same site — a page already in the
+              knowledge base is never fetched twice. A big site won&apos;t all fit in one pass; add it
+              once, then use <span className="font-medium">Process again</span> from the Websites tab
+              to keep working through the rest.
             </span>
           </label>
           {crawl && (
@@ -106,11 +115,10 @@ export function UrlUploadForm() {
               <SingleSelect
                 value={crawlDepth}
                 onChange={setCrawlDepth}
-                options={[
-                  { value: '1', label: '1 — pages linked directly from this one' },
-                  { value: '2', label: '2 — and pages linked from those' },
-                  { value: '3', label: '3 — and one hop further still' },
-                ]}
+                options={Array.from({ length: MAX_CRAWL_DEPTH }, (_, i) => i + 1).map((n) => ({
+                  value: String(n),
+                  label: `${n} — ${depthLabel(n)}`,
+                }))}
               />
             </label>
           )}

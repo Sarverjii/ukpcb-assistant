@@ -6,13 +6,14 @@ import Link from 'next/link';
 import { Upload, Files, Globe, AlertTriangle, RotateCw } from 'lucide-react';
 import { UploadForm } from '@/components/documents/UploadForm';
 import { UrlUploadForm } from '@/components/documents/UrlUploadForm';
-import { WebsiteGroups } from '@/components/documents/WebsiteGroups';
+import { WebsiteGroups, type CrawlSiteRow } from '@/components/documents/WebsiteGroups';
 import { DocumentsTable, type DocumentRow } from '@/components/documents/DocumentsTable';
 import { useUploadQueue } from '@/components/documents/UploadQueueContext';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
 import type { PickableLocation } from '@/components/shared/LocationPicker';
 import { isDailyQuotaError, isRateLimitError } from '@/lib/ai/errors';
-import { retryDocumentAction } from '@/app/(app)/knowledge-base/actions';
+import { retryDocumentAction, reprocessCrawlSiteAction, updateCrawlSiteDepthAction } from '@/app/(app)/knowledge-base/actions';
+import { MAX_CRAWL_DEPTH } from '@/lib/documents/crawlConstants';
 
 type Role = { hierarchyRank: number; name: string };
 type TabId = 'upload' | 'documents' | 'websites';
@@ -52,6 +53,7 @@ export function KnowledgeBase({
   documents,
   departments,
   locations,
+  crawlSites,
   useClientUpload,
   uploadMaxMb,
 }: {
@@ -60,6 +62,7 @@ export function KnowledgeBase({
   documents: DocumentRow[];
   departments: PickableDepartment[];
   locations: PickableLocation[];
+  crawlSites: CrawlSiteRow[];
   useClientUpload: boolean;
   uploadMaxMb: number;
 }) {
@@ -289,7 +292,21 @@ export function KnowledgeBase({
               </p>
             </div>
           ) : (
-            <WebsiteGroups documents={websiteDocuments} />
+            <WebsiteGroups
+              documents={websiteDocuments.map((d) => ({ id: d.id, name: d.name, sourceUrl: d.sourceUrl!, status: d.status }))}
+              crawlSites={crawlSites}
+              maxDepth={MAX_CRAWL_DEPTH}
+              onProcessAgain={async (crawlSiteId) => {
+                const result = await reprocessCrawlSiteAction(crawlSiteId);
+                router.refresh();
+                return result;
+              }}
+              onChangeDepth={async (crawlSiteId, depth) => {
+                const result = await updateCrawlSiteDepthAction(crawlSiteId, depth);
+                router.refresh();
+                return result;
+              }}
+            />
           )}
         </section>
       )}

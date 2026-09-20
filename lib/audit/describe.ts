@@ -45,9 +45,21 @@ export function describeAuditEvent(
       return name ? `Uploaded document "${name}" at ${roleName(m.clearanceLevel)} clearance` : 'Uploaded a document';
     }
     case 'DOCUMENT_ADDED_FROM_URL': {
-      const name = str(m.name);
-      const url = str(m.url);
-      return name ? `Added "${name}" from ${url ?? 'a URL'} at ${roleName(m.clearanceLevel)} clearance` : 'Added a document from a URL';
+      const url = str(m.url) ?? 'a URL';
+      const pagesAdded = num(m.pagesAdded);
+      const pool = m.public === true ? ' to Public Content' : '';
+      // "Process again" (reprocessCrawlSiteAction / reprocessPublicCrawlSiteAction)
+      // logs this exact same action, distinguished only by this flag — see
+      // either action's own comment for why re-running is always safe.
+      if (m.reprocessed === true) {
+        return pagesAdded !== null && pagesAdded > 0
+          ? `Reprocessed ${url}${pool} — found ${pagesAdded} new page${pagesAdded === 1 ? '' : 's'}`
+          : `Reprocessed ${url}${pool} — no new pages found`;
+      }
+      if (pagesAdded !== null && pagesAdded > 1) {
+        return `Added ${pagesAdded} pages from ${url}${pool} (crawled)`;
+      }
+      return `Added ${url}${pool} from a URL`;
     }
     case 'DOCUMENT_PROCESSED': {
       const count = num(m.chunkCount);

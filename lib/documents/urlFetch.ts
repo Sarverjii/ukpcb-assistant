@@ -7,7 +7,8 @@ import { Agent } from 'undici';
 // server fetching an admin-supplied URL is a classic SSRF vector (probing
 // internal services, cloud metadata endpoints like 169.254.169.254, etc.),
 // so every request here is resolved and range-checked BEFORE fetching,
-// redirects are refused outright rather than followed, and the response is
+// redirects are followed only to the same host (see
+// MAX_SAME_HOST_REDIRECTS below) and never off-host, and the response is
 // capped in both time and size. This is a reasonable, standard defense for
 // a feature gated behind canUploadDocuments (a vetted employee, not the
 // public internet) - it is NOT a hardened anti-SSRF gateway: `fetch()`
@@ -77,7 +78,16 @@ export type FetchedPage = {
   contentType: 'text/html' | 'text/plain';
 };
 
-export async function fetchUrlForIngestion(rawUrl: string): Promise<FetchedPage> {
+// Same-host redirects are followed (a large site's own links routinely
+// 302 to a canonical URL on the same host — confirmed on ukpcb.uk.gov.in,
+// where some menu links redirect), but ONLY same-host and only a few hops:
+// following an off-host redirect would let an admin-pasted URL bounce the
+// server to an arbitrary address, which is the exact SSRF shape the checks
+// below exist to prevent. Every hop re-runs the full DNS/private-IP check
+// (it's a recursive call), never trusting the previous hop's validation.
+const MAX_SAME_HOST_REDIRECTS = 3;
+
+export async function fetchUrlForIngestion(rawUrl: string, redirectsLeft = MAX_SAME_HOST_REDIRECTS): Promise<FetchedPage> {
   let url: URL;
   try {
     url = new URL(rawUrl.trim());
@@ -123,6 +133,16 @@ export async function fetchUrlForIngestion(rawUrl: string): Promise<FetchedPage>
   }
 
   if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get('location');
+    let target: URL | null = null;
+    try {
+      target = location ? new URL(location, url) : null;
+    } catch {
+      target = null;
+    }
+    if (target && target.hostname === url.hostname && redirectsLeft > 0) {
+      return fetchUrlForIngestion(target.toString(), redirectsLeft - 1);
+    }
     throw new UrlFetchError(
       `This URL redirects elsewhere (${response.status}) — paste the final destination URL directly instead.`,
     );
