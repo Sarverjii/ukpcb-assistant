@@ -1,5 +1,6 @@
 import dns from 'node:dns/promises';
 import net from 'node:net';
+import { Agent } from 'undici';
 
 // Fetches a public web page server-side for "add a document from a URL" —
 // see app/(app)/knowledge-base/actions.ts::addDocumentFromUrlAction. A
@@ -21,6 +22,26 @@ import net from 'node:net';
 const MAX_BYTES = 10 * 1024 * 1024; // 10MB - a page far larger than that is not a reasonable knowledge-base document
 const FETCH_TIMEOUT_MS = 15_000;
 const USER_AGENT = 'UKPCBAssistant-DocumentFetcher/1.0 (+internal knowledge base import)';
+
+// Real government/PSU sites (the exact kind of source this feature exists
+// to ingest) not infrequently serve an HTTPS certificate that's expired,
+// self-signed, or chained to a CA Node doesn't trust — confirmed directly:
+// https://ukpcb.uk.gov.in/ itself, the Board's own site, failed with a
+// bare "fetch failed" (a TLS handshake rejection, not a real network
+// error) before this existed. Node's global fetch has no per-request way
+// to relax certificate verification on its own; passing this undici Agent
+// as `dispatcher` on the one fetch call below is the standard way to do
+// that scoped to just this request — it does NOT touch Node's default TLS
+// behavior, so every other outbound connection in this app (the LLM/
+// embedding providers, Vercel Blob, Postgres, NextAuth) still verifies
+// certificates normally. This does trade away MITM protection for this
+// one fetch — acceptable here because the content being fetched is never
+// treated as trusted/executable (it's extracted as plain text, chunked,
+// and embedded — see lib/documents/textExtraction.ts), the DNS/private-IP
+// SSRF checks above are unaffected, and the feature is already gated
+// behind canUploadDocuments (a vetted employee deliberately pasting a URL
+// they intend to trust), not open to arbitrary/anonymous input.
+const insecureAgent = new Agent({ connect: { rejectUnauthorized: false } });
 
 export class UrlFetchError extends Error {}
 
@@ -85,6 +106,11 @@ export async function fetchUrlForIngestion(rawUrl: string): Promise<FetchedPage>
       signal: controller.signal,
       redirect: 'manual',
       headers: { 'User-Agent': USER_AGENT },
+      // @ts-expect-error — `dispatcher` is an undici-specific extension to
+      // the standard fetch() options that Node's global fetch (itself
+      // undici-backed) honors at runtime; the DOM lib's fetch types don't
+      // know about it. See insecureAgent's own comment above.
+      dispatcher: insecureAgent,
     });
   } catch (err) {
     throw new UrlFetchError(
