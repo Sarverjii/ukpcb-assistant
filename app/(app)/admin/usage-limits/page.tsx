@@ -15,6 +15,7 @@ export default async function UsageLimitsPage() {
       </p>
       <UsageLimitsManager
         org={snapshot.org}
+        publicOrg={snapshot.publicOrg}
         users={snapshot.users.map((u) => ({
           id: u.id,
           label: u.name,

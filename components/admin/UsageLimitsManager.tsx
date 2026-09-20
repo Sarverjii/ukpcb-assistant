@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { Check, Pencil, X, Gauge, Users, Building2 } from 'lucide-react';
-import { setOrgMessageLimitAction } from '@/app/(app)/admin/usage-limits/actions';
+import { Check, Pencil, X, Gauge, Globe, Users, Building2 } from 'lucide-react';
+import { setOrgMessageLimitAction, setPublicOrgMessageLimitAction } from '@/app/(app)/admin/usage-limits/actions';
 
 type UsageRow = { id: string; label: string; sublabel?: string; used: number; limit: number };
 
@@ -17,15 +17,19 @@ type UsageRow = { id: string; label: string; sublabel?: string; used: number; li
  */
 export function UsageLimitsManager({
   org,
+  publicOrg,
   users,
   departments,
 }: {
   org: { used: number; limit: number };
+  publicOrg: { used: number; limit: number };
   users: UsageRow[];
   departments: UsageRow[];
 }) {
   const [editingOrg, setEditingOrg] = useState(false);
   const [orgLimitValue, setOrgLimitValue] = useState(String(org.limit));
+  const [editingPublicOrg, setEditingPublicOrg] = useState(false);
+  const [publicOrgLimitValue, setPublicOrgLimitValue] = useState(String(publicOrg.limit));
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -40,6 +44,20 @@ export function UsageLimitsManager({
       const result = await setOrgMessageLimitAction(parsed);
       if (result.error) setError(result.error);
       else setEditingOrg(false);
+    });
+  }
+
+  function savePublicOrgLimit() {
+    const parsed = Number(publicOrgLimitValue);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      setError('Daily message limit must be a positive whole number.');
+      return;
+    }
+    setError(null);
+    startTransition(async () => {
+      const result = await setPublicOrgMessageLimitAction(parsed);
+      if (result.error) setError(result.error);
+      else setEditingPublicOrg(false);
     });
   }
 
@@ -114,6 +132,78 @@ export function UsageLimitsManager({
           )}
         </div>
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      </section>
+
+      <section className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 dark:bg-brand-950 text-brand-600 dark:text-brand-400">
+              <Globe size={18} />
+            </span>
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-white">Public chat daily limit</h2>
+              <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                A separate pool from the employee limit above, for the unauthenticated public chat on
+                the home page — it can never eat into (or be capped by) the company&apos;s own AI
+                budget, and vice versa. Each visitor is also capped individually, not admin-configurable.
+                Resets at midnight UTC.
+              </p>
+            </div>
+          </div>
+          {!editingPublicOrg && (
+            <button
+              type="button"
+              onClick={() => {
+                setPublicOrgLimitValue(String(publicOrg.limit));
+                setEditingPublicOrg(true);
+                setError(null);
+              }}
+              className="flex shrink-0 items-center gap-1.5 rounded-md border border-zinc-300 dark:border-zinc-700 px-2.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+            >
+              <Pencil size={13} /> Edit
+            </button>
+          )}
+        </div>
+
+        <div className="mt-4 flex items-center gap-4">
+          {editingPublicOrg ? (
+            <span className="flex items-center gap-1.5">
+              <input
+                autoFocus
+                type="number"
+                min={1}
+                value={publicOrgLimitValue}
+                onChange={(e) => setPublicOrgLimitValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') savePublicOrgLimit();
+                  if (e.key === 'Escape') setEditingPublicOrg(false);
+                }}
+                disabled={pending}
+                className="w-28 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 text-sm"
+              />
+              <button
+                type="button"
+                onClick={savePublicOrgLimit}
+                disabled={pending}
+                aria-label="Save"
+                className="rounded p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950 disabled:opacity-50"
+              >
+                <Check size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingPublicOrg(false)}
+                disabled={pending}
+                aria-label="Cancel"
+                className="rounded p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+              >
+                <X size={16} />
+              </button>
+            </span>
+          ) : (
+            <UsageBar used={publicOrg.used} limit={publicOrg.limit} size="lg" />
+          )}
+        </div>
       </section>
 
       <section>

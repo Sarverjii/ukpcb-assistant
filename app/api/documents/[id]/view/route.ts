@@ -12,14 +12,24 @@ import { getStorageProvider } from '@/lib/documents/storage';
  * Content-Disposition: attachment): any user cleared for the document
  * needs to reach this one, since a citation can surface to any employee
  * whose clearance covers it, not just admins. Authorization here is the
- * same rule as chunk retrieval — clearanceRank <= the document's level, AND
+ * same rule as chunk retrieval — EITHER the document is public (isPublic —
+ * see its own schema.prisma comment: bypasses everything below, same as
+ * every retrieval path), OR clearanceRank <= the document's level, AND
  * (the document has no department at all, OR the caller belongs to one of
- * its departments, OR the caller has head-department access) — just
- * checked against the document directly rather than a chunk. Clearance is
- * a hard requirement; department only ever narrows, never widens, who a
- * clearance level already admits. This route and every listing/retrieval
- * path must always agree — a real reported bug once had this route
- * missing the department half entirely.
+ * its departments, OR the caller has head-department access), AND the
+ * caller's single location is among the document's own locations — just
+ * checked against the document directly rather than a chunk. Clearance and
+ * location are both hard requirements; department only ever narrows,
+ * never widens, who a clearance level already admits. This route and
+ * every listing/retrieval path must always agree — a real reported bug
+ * once had this route missing the department half entirely, and a second
+ * one (found by actually clicking a public document's citation as a
+ * logged-in employee, not anticipated) had it missing the isPublic bypass
+ * entirely: a public document has empty departments/locations by design
+ * (see Document.isPublic's comment), so `locationOk` below is
+ * UNCONDITIONALLY false for one without this bypass — every employee,
+ * admin included, got a bare 403 opening a citation chunk retrieval had
+ * already deemed them authorized to see.
  */
 export async function GET(_request: Request, { params }: RouteContext<'/api/documents/[id]/view'>) {
   let ctx;
@@ -45,7 +55,8 @@ export async function GET(_request: Request, { params }: RouteContext<'/api/docu
     document.departments.length === 0 ||
     document.departments.some((d) => ctx.departmentIds.includes(d.id)) ||
     ctx.hasHeadDepartmentAccess;
-  if (!hasClearance || !departmentOk) {
+  const locationOk = document.locations.some((l) => l.id === ctx.locationId);
+  if (!document.isPublic && (!hasClearance || !departmentOk || !locationOk)) {
     await logAuditEvent({
       action: 'ACCESS_DENIED',
       result: 'DENIED',

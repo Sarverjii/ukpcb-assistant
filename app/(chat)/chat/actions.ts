@@ -92,7 +92,13 @@ export type CitationPreviewResult =
  */
 export async function getCitationPreviewAction(chunkId: string): Promise<CitationPreviewResult> {
   const ctx = await getAuthContext();
-  const chunk = await getChunkForUser(chunkId, ctx.clearanceRank, ctx.departmentIds, ctx.hasHeadDepartmentAccess);
+  const chunk = await getChunkForUser(
+    chunkId,
+    ctx.clearanceRank,
+    ctx.departmentIds,
+    ctx.hasHeadDepartmentAccess,
+    ctx.locationId,
+  );
   if (!chunk) return { error: 'This citation is no longer available to your role.' };
 
   await logAuditEvent({

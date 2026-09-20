@@ -71,6 +71,14 @@ export function describeAuditEvent(
         ? `Changed ${label}'s departments (now ${count} department${count === 1 ? '' : 's'})`
         : `Changed ${label}'s departments`;
     }
+    case 'DOCUMENT_LOCATIONS_CHANGED': {
+      const name = str(m.documentName);
+      const count = num(m.newLocationCount);
+      const label = name ? `"${name}"` : 'a document';
+      return count !== null
+        ? `Changed ${label}'s locations (now ${count} location${count === 1 ? '' : 's'})`
+        : `Changed ${label}'s locations`;
+    }
     case 'DOCUMENT_REPLACED': {
       const name = str(m.documentName);
       return name ? `Replaced the file for "${name}"` : 'Replaced a document’s file';
@@ -162,6 +170,13 @@ export function describeAuditEvent(
         ? `Changed ${name}'s departments (now ${count} department${count === 1 ? '' : 's'})`
         : `Changed ${name}'s departments`;
     }
+    case 'EMPLOYEE_LOCATION_CHANGED': {
+      const name = str(m.employeeName) ?? 'an employee';
+      const prev = str(m.previousLocationName);
+      const next = str(m.newLocationName);
+      if (prev && next) return `Changed ${name}'s location from ${prev} to ${next}`;
+      return next ? `Changed ${name}'s location to ${next}` : `Changed ${name}'s location`;
+    }
     case 'DEPARTMENT_CREATED': {
       const name = str(m.name);
       return name ? `Created department "${name}"` : 'Created a department';
@@ -247,8 +262,17 @@ export function describeAuditEvent(
       // message limit" (the previous version, plugging "their own" into
       // "hit the X daily message limit") was a real grammar bug, found by
       // actually reading the rendered audit log, not just the code.
+      const ip = str(m.ip);
       const subject =
-        scope === 'ORG' ? "the company-wide" : scope === 'DEPARTMENT' ? `${deptName ?? 'a department'}'s` : 'their own';
+        scope === 'ORG'
+          ? 'the company-wide'
+          : scope === 'DEPARTMENT'
+            ? `${deptName ?? 'a department'}'s`
+            : scope === 'PUBLIC_ORG'
+              ? "the public chat's total"
+              : scope === 'PUBLIC_IP'
+                ? `the public chat's per-visitor (${ip ?? 'unknown IP'})`
+                : 'their own';
       return limit !== null
         ? `Blocked: hit ${subject} daily message limit (${used ?? '?'}/${limit})`
         : 'Blocked: hit a daily message limit';
@@ -258,6 +282,7 @@ export function describeAuditEvent(
       const limit = num(m.newLimit);
       const target = str(m.targetName);
       if (scope === 'ORG') return limit !== null ? `Set the company-wide daily message limit to ${limit}` : 'Changed the company-wide daily message limit';
+      if (scope === 'PUBLIC_ORG') return limit !== null ? `Set the public chat's daily message limit to ${limit}` : "Changed the public chat's daily message limit";
       if (scope === 'DEPARTMENT') return `Set ${target ?? 'a department'}'s daily message limit to ${limit === null ? 'unset' : limit}`;
       if (scope === 'ROLE') return `Set ${target ?? 'a role'}'s default daily message limit to ${limit ?? 'unset'}`;
       if (scope === 'USER') return `Set ${target ?? 'an employee'}'s daily message limit override to ${limit === null ? 'unset (inherit role default)' : limit}`;

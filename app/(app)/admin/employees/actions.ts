@@ -12,6 +12,7 @@ import {
   updateUserStatus,
   updateUserPasswordHash,
   updateUserDepartments,
+  updateUserLocation,
   updateUserMessageLimitOverride,
   getUserById,
   getRoleById,
@@ -20,6 +21,7 @@ import {
   getExistingEmailSet,
 } from '@/lib/db/queries/users';
 import { listDepartments, requireNonEmptyDepartments } from '@/lib/db/queries/departments';
+import { listLocations, getLocationById, requireNonEmptyLocations } from '@/lib/db/queries/locations';
 import { listDocumentsByUploader } from '@/lib/db/queries/documents';
 import { countConversationsForUser } from '@/lib/db/queries/conversations';
 import {
@@ -45,12 +47,15 @@ export async function createEmployeeAction(formData: FormData): Promise<ActionRe
   const email = String(formData.get('email') ?? '').trim().toLowerCase();
   const roleId = String(formData.get('roleId') ?? '');
   const departmentIds = formData.getAll('departmentIds').map(String).filter(Boolean);
+  const locationId = String(formData.get('locationId') ?? '');
 
-  if (!name || !email || !roleId) {
-    return { error: 'Name, email, and role are required.' };
+  if (!name || !email || !roleId || !locationId) {
+    return { error: 'Name, email, role, and location are required.' };
   }
   const departmentError = requireNonEmptyDepartments(departmentIds, 'employee');
   if (departmentError) return { error: departmentError };
+  const locationError = requireNonEmptyLocations([locationId], 'employee');
+  if (locationError) return { error: locationError };
 
   const tempPassword = generateTempPassword();
   const passwordHash = await hashPassword(tempPassword);
@@ -63,6 +68,7 @@ export async function createEmployeeAction(formData: FormData): Promise<ActionRe
       passwordHash,
       roleId,
       departmentIds,
+      locationId,
       createdById: ctx.userId,
       creationMethod: 'MANUAL',
     });
@@ -110,6 +116,39 @@ export async function changeEmployeeDepartmentsAction(
     userId: ctx.userId,
     resource: userId,
     metadata: { employeeName: before.name, employeeEmail: before.email, newDepartmentCount: departmentIds.length },
+  });
+  revalidatePath('/admin/employees');
+  return {};
+}
+
+/**
+ * Reassigns which single location an employee belongs to — see
+ * User.locationId's schema.prisma comment for why this is a single-select
+ * scalar (not a multi-select relation like departments). No self-
+ * modification restriction, same reasoning as changeEmployeeDepartmentsAction:
+ * moving your own location isn't a privilege-escalation vector.
+ */
+export async function changeEmployeeLocationAction(userId: string, locationId: string): Promise<ActionResult> {
+  const ctx = await getAuthContext();
+  await requireAdmin(ctx);
+
+  const locationError = requireNonEmptyLocations([locationId], 'employee');
+  if (locationError) return { error: locationError };
+
+  const before = await getUserById(userId);
+  const newLocation = await getLocationById(locationId);
+  await updateUserLocation(userId, locationId);
+  await logAuditEvent({
+    action: 'EMPLOYEE_LOCATION_CHANGED',
+    result: 'SUCCESS',
+    userId: ctx.userId,
+    resource: userId,
+    metadata: {
+      employeeName: before.name,
+      employeeEmail: before.email,
+      previousLocationName: before.location.name,
+      newLocationName: newLocation.name,
+    },
   });
   revalidatePath('/admin/employees');
   return {};
@@ -424,21 +463,23 @@ export async function bulkImportEmployeesAction(formData: FormData): Promise<Bul
     data: { fileKey, fileName: file.name, uploadedById: ctx.userId, rowCount: rows.length, successCount: 0, failureCount: 0 },
   });
 
-  const [roles, departments, existingEmails] = await Promise.all([
+  const [roles, departments, locations, existingEmails] = await Promise.all([
     listRolesByRank(),
     listDepartments(),
+    listLocations(),
     getExistingEmailSet(),
   ]);
   const roleByName = new Map(roles.map((r) => [r.name.toLowerCase(), r]));
   const departmentByName = new Map(departments.map((d) => [d.name.toLowerCase(), d]));
+  const locationByName = new Map(locations.map((l) => [l.name.toLowerCase(), l]));
   const seenEmails = new Set<string>();
 
   const results: BulkImportRowResult[] = [];
   const createdEmails: ComposedEmail[] = [];
-  const failedRows: { rowNumber: number; name: string; email: string; roleName: string; departmentNames: string[]; reason: string }[] = [];
+  const failedRows: { rowNumber: number; name: string; email: string; roleName: string; departmentNames: string[]; locationName: string; reason: string }[] = [];
 
   for (const row of rows) {
-    const result = await importOneRow(row, roleByName, departmentByName, existingEmails, seenEmails, ctx.userId, batch.id);
+    const result = await importOneRow(row, roleByName, departmentByName, locationByName, existingEmails, seenEmails, ctx.userId, batch.id);
     results.push(result.rowResult);
     if (result.email) createdEmails.push(result.email);
     if (result.rowResult.status !== 'created') {
@@ -448,6 +489,7 @@ export async function bulkImportEmployeesAction(formData: FormData): Promise<Bul
         email: row.email,
         roleName: row.roleName,
         departmentNames: row.departmentNames,
+        locationName: row.locationName,
         reason: result.rowResult.message ?? 'Unknown error',
       });
     }
@@ -486,6 +528,7 @@ async function importOneRow(
   row: BulkImportRow,
   roleByName: Map<string, { id: string; name: string }>,
   departmentByName: Map<string, { id: string; name: string }>,
+  locationByName: Map<string, { id: string; name: string }>,
   existingEmails: Set<string>,
   seenEmails: Set<string>,
   actingAdminId: string,
@@ -495,7 +538,9 @@ async function importOneRow(
     rowResult: { rowNumber: row.rowNumber, email: row.email, status: 'error', message },
   });
 
-  if (!row.name || !row.email || !row.roleName) return fail('Missing name, email, or role.');
+  if (!row.name || !row.email || !row.roleName || !row.locationName) {
+    return fail('Missing name, email, role, or location.');
+  }
   if (row.departmentNames.length === 0) return fail('Missing department — every employee must belong to at least one.');
   if (seenEmails.has(row.email)) return fail('Duplicate email within this file.');
   seenEmails.add(row.email);
@@ -521,6 +566,9 @@ async function importOneRow(
     return fail(`Unknown department${unknownDepartments.length === 1 ? '' : 's'}: ${unknownDepartments.join(', ')}.`);
   }
 
+  const location = locationByName.get(row.locationName.toLowerCase());
+  if (!location) return fail(`Unknown location "${row.locationName}".`);
+
   const tempPassword = generateTempPassword();
   const passwordHash = await hashPassword(tempPassword);
 
@@ -531,6 +579,7 @@ async function importOneRow(
       passwordHash,
       roleId: role.id,
       departmentIds,
+      locationId: location.id,
       createdById: actingAdminId,
       creationMethod: 'BULK_IMPORT',
       importBatchId,

@@ -3,6 +3,7 @@ import { getAuthContext } from '@/lib/auth/session';
 import { listDocumentsWithUploader } from '@/lib/db/queries/documents';
 import { listRolesByRank } from '@/lib/db/queries/users';
 import { listDepartments } from '@/lib/db/queries/departments';
+import { listLocations } from '@/lib/db/queries/locations';
 import { KnowledgeBase } from '@/components/documents/KnowledgeBase';
 import { config } from '@/lib/config';
 import { logAuditEvent } from '@/lib/audit/log';
@@ -43,10 +44,11 @@ export default async function KnowledgeBasePage() {
   // document as) and the documents list (what you can view/manage).
   const ceiling = ctx.isAdmin ? undefined : ctx.clearanceRank;
 
-  const [documents, roles, departments] = await Promise.all([
+  const [documents, roles, departments, locations] = await Promise.all([
     listDocumentsWithUploader(ceiling),
     listRolesByRank(),
     listDepartments(),
+    listLocations(),
   ]);
   const availableRoles = roles.filter((r) => ctx.isAdmin || r.hierarchyRank <= ctx.clearanceRank);
 
@@ -62,6 +64,7 @@ export default async function KnowledgeBasePage() {
           isAdmin={ctx.isAdmin}
           roles={availableRoles.map((r) => ({ hierarchyRank: r.hierarchyRank, name: r.name }))}
           departments={departments.map((d) => ({ id: d.id, name: d.name }))}
+          locations={locations.map((l) => ({ id: l.id, name: l.name }))}
           documents={documents.map((d) => ({
             id: d.id,
             name: d.name,
@@ -71,6 +74,7 @@ export default async function KnowledgeBasePage() {
             uploadedByName: d.uploadedBy?.name ?? 'Removed employee',
             clearanceLevel: d.clearanceLevel,
             departments: d.departments.map((dept) => ({ id: dept.id, name: dept.name })),
+            locations: d.locations.map((loc) => ({ id: loc.id, name: loc.name })),
             status: d.status,
             createdAt: d.createdAt.toISOString(),
             updatedAt: d.updatedAt.toISOString(),

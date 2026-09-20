@@ -3,20 +3,22 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Users, Building2, Network, ScrollText, Cpu, Gauge, ChevronDown, Check } from 'lucide-react';
+import { LayoutDashboard, Users, Building2, Network, ScrollText, Cpu, Gauge, Globe, ChevronDown, Check } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 // Document management lives in the UKPCB Knowledge Base now (see
 // app/(app)/knowledge-base) — reachable by any role granted upload
 // rights, not just admins, so it's deliberately not one of these tabs.
-// What's left here (Overview, Employees, Departments, Hierarchy, Audit
-// Log) is the genuinely admin-only surface: user/role/org-structure
-// management and the audit trail.
+// "Public Content" (app/(app)/admin/public-content) IS one of these tabs
+// despite also being document/URL management — unlike the Knowledge Base,
+// it's admin-only (no clearance/canUploadDocuments concept applies to a
+// public document at all), so it belongs here, not there.
 const SECTIONS: { href: string; label: string; icon: LucideIcon }[] = [
   { href: '/admin', label: 'Overview', icon: LayoutDashboard },
   { href: '/admin/employees', label: 'Employees', icon: Users },
   { href: '/admin/departments', label: 'Departments', icon: Building2 },
   { href: '/admin/hierarchy', label: 'Hierarchy', icon: Network },
+  { href: '/admin/public-content', label: 'Public Content', icon: Globe },
   { href: '/admin/ai-providers', label: 'AI Models', icon: Cpu },
   { href: '/admin/usage-limits', label: 'Usage Limits', icon: Gauge },
   { href: '/admin/audit-logs', label: 'Audit Log', icon: ScrollText },

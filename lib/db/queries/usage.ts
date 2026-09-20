@@ -1,11 +1,17 @@
 import { prisma } from '@/lib/db/prisma';
 import type { Prisma } from '@prisma/client';
 
-export type UsageScope = 'USER' | 'DEPARTMENT' | 'ORG';
+export type UsageScope = 'USER' | 'DEPARTMENT' | 'ORG' | 'PUBLIC_ORG' | 'PUBLIC_IP';
 
 // The fixed scopeId UsageScope.ORG rows always use — there is only ever
 // one org, so this needs no real id the way a User/Department row does.
 export const ORG_SCOPE_ID = 'org';
+
+// Same idea as ORG_SCOPE_ID, for the public chat's own org-wide counter
+// (UsageScope.PUBLIC_ORG) — a fixed, distinct string so it can never
+// collide with ORG_SCOPE_ID in the (scope, scopeId, day) unique index,
+// even though the two scopes already keep them apart on their own.
+export const PUBLIC_ORG_SCOPE_ID = 'public';
 
 /** Today's UTC calendar day, truncated to midnight — the bucket key every UsageCounter row is keyed on. */
 export function utcDayStart(): Date {
@@ -104,6 +110,15 @@ export async function updateOrgUsagePolicy(dailyMessageLimit: number, updatedByI
   });
 }
 
+/** Same as updateOrgUsagePolicy, for the public chat's separate org-wide cap (OrgUsagePolicy.publicDailyMessageLimit). */
+export async function updatePublicOrgUsagePolicy(publicDailyMessageLimit: number, updatedById: string) {
+  return prisma.orgUsagePolicy.upsert({
+    where: { id: 'org-usage-policy' },
+    update: { publicDailyMessageLimit, updatedById },
+    create: { id: 'org-usage-policy', publicDailyMessageLimit, updatedById },
+  });
+}
+
 /**
  * Today's usage dashboard for the admin Usage Limits page: every
  * employee and department with at least one message today, each next to
@@ -114,6 +129,7 @@ export async function updateOrgUsagePolicy(dailyMessageLimit: number, updatedByI
  */
 export async function getTodayUsageSnapshot(): Promise<{
   org: { used: number; limit: number };
+  publicOrg: { used: number; limit: number };
   users: { id: string; name: string; email: string; used: number; limit: number }[];
   departments: { id: string; name: string; used: number; limit: number }[];
 }> {
@@ -123,9 +139,14 @@ export async function getTodayUsageSnapshot(): Promise<{
     prisma.usageCounter.findMany({ where: { scope: 'USER', day }, orderBy: { count: 'desc' } }),
     prisma.usageCounter.findMany({ where: { scope: 'DEPARTMENT', day }, orderBy: { count: 'desc' } }),
   ]);
-  const orgCounter = await prisma.usageCounter.findUnique({
-    where: { scope_scopeId_day: { scope: 'ORG', scopeId: ORG_SCOPE_ID, day } },
-  });
+  const [orgCounter, publicOrgCounter] = await Promise.all([
+    prisma.usageCounter.findUnique({
+      where: { scope_scopeId_day: { scope: 'ORG', scopeId: ORG_SCOPE_ID, day } },
+    }),
+    prisma.usageCounter.findUnique({
+      where: { scope_scopeId_day: { scope: 'PUBLIC_ORG', scopeId: PUBLIC_ORG_SCOPE_ID, day } },
+    }),
+  ]);
 
   const userIds = userCounters.map((c) => c.scopeId);
   const deptIds = deptCounters.map((c) => c.scopeId);
@@ -145,6 +166,7 @@ export async function getTodayUsageSnapshot(): Promise<{
 
   return {
     org: { used: orgCounter?.count ?? 0, limit: orgPolicy.dailyMessageLimit },
+    publicOrg: { used: publicOrgCounter?.count ?? 0, limit: orgPolicy.publicDailyMessageLimit },
     users: userCounters
       .map((c) => {
         const u = userById.get(c.scopeId);

@@ -9,11 +9,17 @@ export type CreateDocumentInput = {
   fileSizeBytes: number;
   clearanceLevel: number;
   departmentIds?: string[];
+  locationIds: string[];
   tags?: string[];
   uploadedById: string;
   // Set only by addDocumentFromUrlAction — see Document.sourceUrl's own
   // comment.
   sourceUrl?: string;
+  // Set only by Admin → Public Content's own actions — see Document.isPublic's
+  // own comment. Every other caller leaves this false, and — unlike a
+  // normal document — a public one is created with empty departmentIds/
+  // locationIds; those axes are simply meaningless for it.
+  isPublic?: boolean;
 };
 
 export function createDocument(input: CreateDocumentInput) {
@@ -26,9 +32,11 @@ export function createDocument(input: CreateDocumentInput) {
       fileSizeBytes: input.fileSizeBytes,
       clearanceLevel: input.clearanceLevel,
       departments: input.departmentIds?.length ? { connect: input.departmentIds.map((id) => ({ id })) } : undefined,
+      locations: { connect: input.locationIds.map((id) => ({ id })) },
       tags: input.tags ?? [],
       uploadedById: input.uploadedById,
       sourceUrl: input.sourceUrl,
+      isPublic: input.isPublic ?? false,
       status: 'PENDING',
     },
   });
@@ -47,8 +55,21 @@ export function updateDocumentDepartments(id: string, departmentIds: string[]) {
   });
 }
 
+/**
+ * Replaces a document's location tagging entirely (not merged) — same
+ * shape as updateDocumentDepartments above, paired with
+ * updateChunksLocationsForDocument (lib/db/queries/chunks.ts) at every
+ * call site.
+ */
+export function updateDocumentLocations(id: string, locationIds: string[]) {
+  return prisma.document.update({
+    where: { id },
+    data: { locations: { set: locationIds.map((lid) => ({ id: lid })) } },
+  });
+}
+
 export function getDocument(id: string) {
-  return prisma.document.findUniqueOrThrow({ where: { id }, include: { departments: true } });
+  return prisma.document.findUniqueOrThrow({ where: { id }, include: { departments: true, locations: true } });
 }
 
 export function setDocumentStatus(id: string, status: DocumentStatus, processingError?: string) {
@@ -100,8 +121,19 @@ export function setDocumentPreviewFileKey(id: string, previewFileKey: string | n
  */
 export function listDocumentsWithUploader(maxClearanceRank?: number) {
   return prisma.document.findMany({
-    where: maxClearanceRank === undefined ? undefined : { clearanceLevel: { lte: maxClearanceRank } },
-    include: { uploadedBy: { select: { name: true, email: true } }, departments: true },
+    // isPublic: false — a public document (Admin → Public Content) is a
+    // deliberately separate, admin-only-managed pool with no clearance/
+    // department/location of its own (see Document.isPublic's own
+    // schema.prisma comment); it has no business showing up in the main
+    // Knowledge Base's management table (or, via sourceUrl, its Websites
+    // tab) where it would render in a broken-looking state (no clearance
+    // level selected, "No locations") and — worse — become editable by
+    // any canUploadDocuments employee, not just an admin, since its
+    // clearanceLevel of 0 trivially passes requireCanManageDocument's
+    // clearance check for everyone. listPublicDocuments() is its own,
+    // correctly-scoped management list.
+    where: { isPublic: false, ...(maxClearanceRank === undefined ? {} : { clearanceLevel: { lte: maxClearanceRank } }) },
+    include: { uploadedBy: { select: { name: true, email: true } }, departments: true, locations: true },
     orderBy: { createdAt: 'desc' },
   });
 }
@@ -144,23 +176,37 @@ export function listDocumentsByUploader(uploadedById: string) {
  * Clearance is a hard requirement (`clearanceLevel: { lte: userClearanceRank }`
  * at the top level, not inside the OR): a document is shown only if the
  * clearance check passes AND (it has no department at all, OR the viewer
- * shares a department with it, OR the viewer has head-department access) —
+ * shares a department with it, OR the viewer has head-department access),
+ * AND the viewer's single location is among the document's own locations —
  * mirroring the SQL-level rule in lib/db/queries/chunks.ts. A department
- * only ever narrows who a clearance level already admits, never widens it.
+ * only ever narrows who a clearance level already admits, never widens it;
+ * location narrows unconditionally, with no "no location" escape hatch,
+ * since every document is required to carry at least one.
  */
 export function listAccessibleDocumentSummariesForBrowsing(
   userClearanceRank: number,
   userDepartmentIds: string[],
   hasHeadDepartmentAccess: boolean,
+  userLocationId: string,
 ) {
   return prisma.document.findMany({
     where: {
       status: 'READY',
-      clearanceLevel: { lte: userClearanceRank },
       OR: [
-        { departments: { none: {} } },
-        { departments: { some: { id: { in: userDepartmentIds } } } },
-        ...(hasHeadDepartmentAccess ? [{ departments: { some: {} } }] : []),
+        // Public documents bypass clearance/department/location entirely —
+        // see Document.isPublic's own comment. Every OTHER document must
+        // satisfy the full clearance-AND-department-AND-location rule,
+        // nested as its own branch below.
+        { isPublic: true },
+        {
+          clearanceLevel: { lte: userClearanceRank },
+          OR: [
+            { departments: { none: {} } },
+            { departments: { some: { id: { in: userDepartmentIds } } } },
+            ...(hasHeadDepartmentAccess ? [{ departments: { some: {} } }] : []),
+          ],
+          locations: { some: { id: userLocationId } },
+        },
       ],
     },
     select: {
@@ -168,6 +214,7 @@ export function listAccessibleDocumentSummariesForBrowsing(
       name: true,
       description: true,
       departments: { select: { id: true, name: true } },
+      locations: { select: { id: true, name: true } },
       tags: true,
       clearanceLevel: true,
       createdAt: true,
@@ -221,15 +268,24 @@ export function listAccessibleDocumentSummaries(
   userClearanceRank: number,
   userDepartmentIds: string[],
   hasHeadDepartmentAccess: boolean,
+  userLocationId: string,
 ) {
   return prisma.document.findMany({
     where: {
       status: 'READY',
-      clearanceLevel: { lte: userClearanceRank },
       OR: [
-        { departments: { none: {} } },
-        { departments: { some: { id: { in: userDepartmentIds } } } },
-        ...(hasHeadDepartmentAccess ? [{ departments: { some: {} } }] : []),
+        // Same public bypass as listAccessibleDocumentSummariesForBrowsing —
+        // see that function's own comment.
+        { isPublic: true },
+        {
+          clearanceLevel: { lte: userClearanceRank },
+          OR: [
+            { departments: { none: {} } },
+            { departments: { some: { id: { in: userDepartmentIds } } } },
+            ...(hasHeadDepartmentAccess ? [{ departments: { some: {} } }] : []),
+          ],
+          locations: { some: { id: userLocationId } },
+        },
       ],
     },
     // id isn't sent to the LLM (see DocumentSummary in lib/llm/types.ts,
@@ -242,18 +298,65 @@ export function listAccessibleDocumentSummaries(
 }
 
 /**
+ * The public counterpart of listAccessibleDocumentSummaries — backs the
+ * unauthenticated public chat's document inventory (the "how many
+ * documents do you have" style question — see lib/rag/publicChat.ts).
+ * ONLY isPublic documents, unconditionally — no clearance/department/
+ * location args at all, since there is no caller identity to check them
+ * against.
+ */
+export function listPublicDocumentSummaries() {
+  return prisma.document.findMany({
+    where: { status: 'READY', isPublic: true },
+    select: { id: true, name: true, description: true },
+    orderBy: { name: 'asc' },
+  });
+}
+
+/**
+ * Every public document/URL, in every status — backs Admin → Public
+ * Content's own management table (the isPublic counterpart of
+ * listDocumentsWithUploader). Includes non-READY rows (still
+ * processing/failed) so an admin can see and retry/delete those too, same
+ * as the main Knowledge Base table does.
+ */
+export function listPublicDocuments() {
+  return prisma.document.findMany({
+    where: { isPublic: true },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+/**
+ * Fetches one document ONLY if it's public — returns null otherwise
+ * (never found, or found but not public), never throws. Backs
+ * app/api/public-documents/[id]/view/route.ts, the unauthenticated
+ * counterpart of [id]/view — the isPublic check here IS the entire
+ * authorization boundary for that route, so it must be scoped directly in
+ * the WHERE, not applied after a plain fetch.
+ */
+export function getPublicDocument(id: string) {
+  return prisma.document.findFirst({ where: { id, isPublic: true } });
+}
+
+/**
  * Every URL already ingested as a document — used by addDocumentFromUrlAction
- * to seed a crawl's "already seen" set so it never re-fetches (and
- * duplicates) a page that's already been added, whether from an earlier
- * crawl, a plain single-URL add, or the same crawl request re-run later.
+ * (main Knowledge Base) and addPublicUrlAction (Admin → Public Content) to
+ * seed their own "already seen" set so neither re-fetches (and duplicates)
+ * a page that's already been added, whether from an earlier crawl, a plain
+ * single-URL add, or the same request re-run later. Scoped by `isPublic`
+ * to each caller's OWN pool — the two are deliberately independent (see
+ * Document.isPublic's own schema.prisma comment), so the same URL must be
+ * addable to both without one blocking the other: a page already private
+ * to the Knowledge Base isn't "already in" Public Content, and vice versa.
  * Unfiltered by domain (this app's corpus is dozens-to-low-hundreds of
  * documents, not worth a WHERE clause over) — the caller only checks
  * membership, so a URL from a different site costing one extra Set entry
  * is free.
  */
-export async function listIngestedSourceUrls(): Promise<string[]> {
+export async function listIngestedSourceUrls(isPublic: boolean): Promise<string[]> {
   const rows = await prisma.document.findMany({
-    where: { sourceUrl: { not: null } },
+    where: { sourceUrl: { not: null }, isPublic },
     select: { sourceUrl: true },
   });
   return rows.map((r) => r.sourceUrl!);

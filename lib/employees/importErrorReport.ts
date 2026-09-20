@@ -6,6 +6,7 @@ export type ImportErrorRow = {
   email: string;
   roleName: string;
   departmentNames: string[];
+  locationName: string;
   reason: string;
 };
 
@@ -27,6 +28,7 @@ export async function buildImportErrorReportXlsx(rows: ImportErrorRow[]): Promis
     { header: 'Email', key: 'email', width: 30 },
     { header: 'Role', key: 'role', width: 20 },
     { header: 'Departments', key: 'departments', width: 30 },
+    { header: 'Location', key: 'location', width: 16 },
     { header: 'Reason', key: 'reason', width: 40 },
   ];
   sheet.getRow(1).font = { bold: true };
@@ -37,6 +39,7 @@ export async function buildImportErrorReportXlsx(rows: ImportErrorRow[]): Promis
       email: row.email,
       role: row.roleName,
       departments: row.departmentNames.join('; '),
+      location: row.locationName,
       reason: row.reason,
     });
   }

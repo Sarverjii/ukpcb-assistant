@@ -5,6 +5,7 @@ import { upload } from '@vercel/blob/client';
 import {
   changeDocumentClearanceAction,
   changeDocumentDepartmentsAction,
+  changeDocumentLocationsAction,
   deleteDocumentAction,
   replaceDocumentAction,
   finalizeReplaceDocumentAction,
@@ -14,6 +15,7 @@ import { Link2, ChevronUp, ChevronDown, ChevronsUpDown, RotateCw } from 'lucide-
 import { LocalTime } from '@/components/admin/LocalTime';
 import { ACCEPTED_EXTENSIONS } from '@/lib/documents/uploadClient';
 import { DepartmentCheckboxList } from '@/components/shared/DepartmentCheckboxList';
+import { LocationPicker, type PickableLocation } from '@/components/shared/LocationPicker';
 import { ClearanceLevelPicker } from '@/components/shared/ClearanceLevelPicker';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
 import { SingleSelect } from '@/components/shared/SingleSelect';
@@ -25,6 +27,7 @@ export type DocumentRow = {
   uploadedByName: string;
   clearanceLevel: number;
   departments: PickableDepartment[];
+  locations: PickableLocation[];
   status: 'PENDING' | 'PROCESSING' | 'READY' | 'FAILED';
   createdAt: string;
   updatedAt: string;
@@ -43,7 +46,7 @@ export type DocumentRow = {
 };
 type Role = { hierarchyRank: number; name: string };
 
-type SortKey = 'name' | 'uploadedByName' | 'clearanceLevel' | 'department' | 'status' | 'updatedAt';
+type SortKey = 'name' | 'uploadedByName' | 'clearanceLevel' | 'department' | 'location' | 'status' | 'updatedAt';
 type SortDir = 'asc' | 'desc';
 
 // Comparable string for the Department column — there's no single scalar
@@ -53,6 +56,11 @@ type SortDir = 'asc' | 'desc';
 // together the same way visually scanning the column already groups them.
 function departmentSortValue(doc: DocumentRow): string {
   return doc.departments.map((d) => d.name).join(', ').toLowerCase();
+}
+
+// Same reasoning as departmentSortValue, applied to the Location column.
+function locationSortValue(doc: DocumentRow): string {
+  return doc.locations.map((l) => l.name).join(', ').toLowerCase();
 }
 
 function compareDocuments(a: DocumentRow, b: DocumentRow, key: SortKey): number {
@@ -65,6 +73,8 @@ function compareDocuments(a: DocumentRow, b: DocumentRow, key: SortKey): number 
       return a.clearanceLevel - b.clearanceLevel;
     case 'department':
       return departmentSortValue(a).localeCompare(departmentSortValue(b));
+    case 'location':
+      return locationSortValue(a).localeCompare(locationSortValue(b));
     case 'status':
       return a.status.localeCompare(b.status);
     case 'updatedAt':
@@ -123,17 +133,20 @@ export function DocumentsTable({
   documents,
   roles,
   departments,
+  locations,
   useClientUpload,
 }: {
   documents: DocumentRow[];
   roles: Role[];
   departments: PickableDepartment[];
+  locations: PickableLocation[];
   useClientUpload: boolean;
 }) {
   const [search, setSearch] = useState('');
   const [clearanceFilter, setClearanceFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [departmentFilter, setDepartmentFilter] = useState('ALL');
+  const [locationFilter, setLocationFilter] = useState('ALL');
   // Defaults to most-recently-updated first — the same order the table
   // effectively had before sorting existed (documents arrive newest-first
   // from the server), so adding this doesn't change what a first-time
@@ -159,6 +172,7 @@ export function DocumentsTable({
     if (clearanceFilter !== 'ALL' && String(d.clearanceLevel) !== clearanceFilter) return false;
     if (statusFilter !== 'ALL' && d.status !== statusFilter) return false;
     if (departmentFilter !== 'ALL' && !d.departments.some((dept) => dept.id === departmentFilter)) return false;
+    if (locationFilter !== 'ALL' && !d.locations.some((loc) => loc.id === locationFilter)) return false;
     if (q && !d.name.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -200,6 +214,13 @@ export function DocumentsTable({
             options={[{ value: 'ALL', label: 'All departments' }, ...departments.map((dept) => ({ value: dept.id, label: dept.name }))]}
           />
         )}
+        {locations.length > 0 && (
+          <SingleSelect
+            value={locationFilter}
+            onChange={setLocationFilter}
+            options={[{ value: 'ALL', label: 'All locations' }, ...locations.map((loc) => ({ value: loc.id, label: loc.name }))]}
+          />
+        )}
         <span className="text-xs text-zinc-400">
           {filtered.length} of {documents.length}
         </span>
@@ -213,6 +234,7 @@ export function DocumentsTable({
               <SortableTh label="Uploaded by" sortKey="uploadedByName" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
               <SortableTh label="Clearance" sortKey="clearanceLevel" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
               <SortableTh label="Department" sortKey="department" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+              <SortableTh label="Location" sortKey="location" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
               <SortableTh label="Status" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
               <SortableTh label="Updated" sortKey="updatedAt" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
               <th className="sticky right-0 bg-zinc-50 px-3 py-2 shadow-[-8px_0_8px_-6px_rgba(0,0,0,0.15)] dark:bg-zinc-900">
@@ -227,12 +249,13 @@ export function DocumentsTable({
                 doc={d}
                 roles={roles}
                 departments={departments}
+                locations={locations}
                 useClientUpload={useClientUpload}
               />
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-3 py-4 text-center text-zinc-400">
+                <td colSpan={8} className="px-3 py-4 text-center text-zinc-400">
                   {documents.length === 0 ? 'No documents yet.' : 'No documents match your search.'}
                 </td>
               </tr>
@@ -248,17 +271,20 @@ function DocumentRow({
   doc,
   roles,
   departments,
+  locations,
   useClientUpload,
 }: {
   doc: DocumentRow;
   roles: Role[];
   departments: PickableDepartment[];
+  locations: PickableLocation[];
   useClientUpload: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [departmentIds, setDepartmentIds] = useState(doc.departments.map((d) => d.id));
+  const [locationIds, setLocationIds] = useState(doc.locations.map((l) => l.id));
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [clearanceLevel, setClearanceLevelState] = useState(doc.clearanceLevel);
@@ -285,6 +311,21 @@ function DocumentRow({
         // leave the picker showing none selected despite the real row
         // still having its old ones, until the next full page load.
         setDepartmentIds(previous);
+      }
+    });
+  }
+
+  function handleLocationsChange(ids: string[]) {
+    const previous = locationIds;
+    setLocationIds(ids);
+    setError(null);
+    startTransition(async () => {
+      const result = await changeDocumentLocationsAction(doc.id, ids);
+      if (result.error) {
+        setError(result.error);
+        // Revert the optimistic update — every document must keep at
+        // least one location, mirroring handleDepartmentsChange above.
+        setLocationIds(previous);
       }
     });
   }
@@ -376,6 +417,14 @@ function DocumentRow({
           departments={departments}
           selectedIds={departmentIds}
           onChange={handleDepartmentsChange}
+          disabled={pending}
+        />
+      </td>
+      <td className="px-3 py-2 min-w-[12rem]">
+        <LocationPicker
+          locations={locations}
+          selectedIds={locationIds}
+          onChange={handleLocationsChange}
           disabled={pending}
         />
       </td>

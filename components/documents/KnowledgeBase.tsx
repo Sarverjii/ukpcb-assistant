@@ -10,6 +10,7 @@ import { WebsiteGroups } from '@/components/documents/WebsiteGroups';
 import { DocumentsTable, type DocumentRow } from '@/components/documents/DocumentsTable';
 import { useUploadQueue } from '@/components/documents/UploadQueueContext';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
+import type { PickableLocation } from '@/components/shared/LocationPicker';
 import { isDailyQuotaError, isRateLimitError } from '@/lib/ai/errors';
 import { retryDocumentAction } from '@/app/(app)/knowledge-base/actions';
 
@@ -50,6 +51,7 @@ export function KnowledgeBase({
   roles,
   documents,
   departments,
+  locations,
   useClientUpload,
   uploadMaxMb,
 }: {
@@ -57,6 +59,7 @@ export function KnowledgeBase({
   roles: Role[];
   documents: DocumentRow[];
   departments: PickableDepartment[];
+  locations: PickableLocation[];
   useClientUpload: boolean;
   uploadMaxMb: number;
 }) {
@@ -237,6 +240,7 @@ export function KnowledgeBase({
               <UploadForm
                 roles={roles}
                 departments={departments}
+                locations={locations}
                 useClientUpload={useClientUpload}
                 uploadMaxMb={uploadMaxMb}
                 onUploadingChange={setSingleUploading}
@@ -268,6 +272,7 @@ export function KnowledgeBase({
               documents={fileDocuments}
               roles={roles}
               departments={departments}
+              locations={locations}
               useClientUpload={useClientUpload}
             />
           </div>

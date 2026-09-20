@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Files, Globe, ExternalLink, ChevronDown } from 'lucide-react';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
+import type { PickableLocation } from '@/components/shared/LocationPicker';
 import { SingleSelect } from '@/components/shared/SingleSelect';
 
 export type LibraryDocument = {
@@ -10,6 +11,13 @@ export type LibraryDocument = {
   name: string;
   description: string | null;
   departments: PickableDepartment[];
+  // Every document shown here already necessarily includes the viewer's
+  // own location (see listAccessibleDocumentSummariesForBrowsing's
+  // unconditional location filter — unlike departments, there's no
+  // isAdmin/head-department bypass), so this is shown for informational
+  // parity with the Department pills, not as something to filter by: a
+  // location filter here would never actually narrow anything down.
+  locations: PickableLocation[];
   tags: string[];
   clearanceLevel: number;
   updatedAt: string;
@@ -162,6 +170,14 @@ export function DocumentLibraryTable({
                       className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-600 dark:text-zinc-300"
                     >
                       {dept.name}
+                    </span>
+                  ))}
+                  {d.locations.map((loc) => (
+                    <span
+                      key={loc.id}
+                      className="rounded-full bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-600 dark:text-zinc-300"
+                    >
+                      {loc.name}
                     </span>
                   ))}
                   {d.tags.map((tag) => (

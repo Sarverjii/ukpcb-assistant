@@ -1,8 +1,13 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { prisma } from '../lib/db/prisma';
 import { seedAuthzFixtures, TEST_USERS } from '../scripts/seed-authz-fixtures';
-import { retrieveAuthorizedChunks, retrieveChunksForDocuments } from '../lib/db/queries/chunks';
-import { listAccessibleDocumentSummaries } from '../lib/db/queries/documents';
+import {
+  retrieveAuthorizedChunks,
+  retrieveChunksForDocuments,
+  retrievePublicChunks,
+  insertDocumentChunks,
+} from '../lib/db/queries/chunks';
+import { listAccessibleDocumentSummaries, listPublicDocumentSummaries } from '../lib/db/queries/documents';
 import { matchDocumentsByName } from '../lib/rag/documentNameMatch';
 import { getEmbeddingProvider } from '../lib/embeddings';
 import { answerQuestion } from '../lib/rag/chat';
@@ -44,6 +49,14 @@ async function authContextFor(email: string): Promise<AuthContext> {
     // below, once added).
     departmentIds: [],
     hasHeadDepartmentAccess: false,
+    // Every seeded test user shares the SAME single location (see
+    // seed-authz-fixtures.ts's TEST_LOCATION_NAME comment), and every
+    // fixture document is tagged with that same location — location is
+    // mandatory (unlike department, no "belongs to none" escape hatch), so
+    // this keeps the location check passing unconditionally for all of
+    // them, leaving clearance/department as the only things these tests
+    // actually vary.
+    locationId: user.locationId,
     themePreference: user.themePreference,
     // No real login session in these tests — every code path under test
     // (answerQuestion/streamAnswer et al.) is session-agnostic.
@@ -64,7 +77,7 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
       const user = await authContextFor(
         TEST_USERS.find((u) => u.roleName === roleName)!.email,
       );
-      const results = await retrieveAuthorizedChunks(embedding, user.clearanceRank, [], false, 10);
+      const results = await retrieveAuthorizedChunks(embedding, user.clearanceRank, [], false, user.locationId, 10);
       for (const chunk of results) {
         expect(
           chunk.clearanceLevel,
@@ -81,10 +94,10 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
     const engineerCtx = await authContextFor('engineer@asktest.local');
     const cxoCtx = await authContextFor('cxo@asktest.local');
 
-    const asEngineer = await retrieveAuthorizedChunks(embedding, engineerCtx.clearanceRank, [], false, 10);
+    const asEngineer = await retrieveAuthorizedChunks(embedding, engineerCtx.clearanceRank, [], false, engineerCtx.locationId, 10);
     expect(asEngineer.some((c) => c.documentName === 'Board Merger Plans')).toBe(false);
 
-    const asCxo = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [], false, 10);
+    const asCxo = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [], false, cxoCtx.locationId, 10);
     expect(asCxo.some((c) => c.documentName === 'Board Merger Plans')).toBe(true);
   });
 
@@ -96,10 +109,10 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
     const engineerCtx = await authContextFor('engineer@asktest.local');
     const cxoCtx = await authContextFor('cxo@asktest.local');
 
-    const asEngineer = await listAccessibleDocumentSummaries(engineerCtx.clearanceRank, [], false);
+    const asEngineer = await listAccessibleDocumentSummaries(engineerCtx.clearanceRank, [], false, engineerCtx.locationId);
     expect(asEngineer.some((d) => d.name === 'Board Merger Plans')).toBe(false);
 
-    const asCxo = await listAccessibleDocumentSummaries(cxoCtx.clearanceRank, [], false);
+    const asCxo = await listAccessibleDocumentSummaries(cxoCtx.clearanceRank, [], false, cxoCtx.locationId);
     expect(asCxo.some((d) => d.name === 'Board Merger Plans')).toBe(true);
   });
 
@@ -123,11 +136,19 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
       engineerCtx.clearanceRank,
       [],
       false,
+      engineerCtx.locationId,
     );
     expect(asEngineer).toHaveLength(0);
 
     const cxoCtx = await authContextFor('cxo@asktest.local');
-    const asCxo = await retrieveChunksForDocuments([boardMergerDoc.id], embedding, cxoCtx.clearanceRank, [], false);
+    const asCxo = await retrieveChunksForDocuments(
+      [boardMergerDoc.id],
+      embedding,
+      cxoCtx.clearanceRank,
+      [],
+      false,
+      cxoCtx.locationId,
+    );
     expect(asCxo.length).toBeGreaterThan(0);
     expect(asCxo.every((c) => c.matchedByDocumentName)).toBe(true);
   });
@@ -157,7 +178,7 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
       const [embedding] = await embedder.embed(['Northwind acquisition due diligence'], 'RETRIEVAL_QUERY');
 
       // Sufficient clearance (CXO) AND matching department (deptA) -> sees it.
-      const cxoInDeptA = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [deptA.id], false, 10);
+      const cxoInDeptA = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [deptA.id], false, cxoCtx.locationId, 10);
       expect(cxoInDeptA.some((c) => c.documentName === 'Board Merger Plans')).toBe(true);
 
       // Sufficient clearance (CXO) but NOT in deptA, no head-department ->
@@ -165,33 +186,33 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
       // clearance. This is the actual behavior change: clearance alone
       // used to be enough, and no longer is once a document has a
       // department.
-      const cxoNotInDeptA = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [], false, 10);
+      const cxoNotInDeptA = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [], false, cxoCtx.locationId, 10);
       expect(cxoNotInDeptA.some((c) => c.documentName === 'Board Merger Plans')).toBe(false);
 
       // Sufficient clearance (CXO) + head-department access (not deptA
       // itself) -> head-department membership counts as matching every
       // department, so this still passes.
-      const cxoWithHeadAccess = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [headDept.id], true, 10);
+      const cxoWithHeadAccess = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [headDept.id], true, cxoCtx.locationId, 10);
       expect(cxoWithHeadAccess.some((c) => c.documentName === 'Board Merger Plans')).toBe(true);
 
       // INSUFFICIENT clearance (engineer, the lowest seeded rank) but IN
       // deptA -> department matches, but clearance does not, so access is
       // still refused. Proves department membership never widens what
       // clearance alone would admit.
-      const engineerInDeptA = await retrieveAuthorizedChunks(embedding, engineerRank, [deptA.id], false, 10);
+      const engineerInDeptA = await retrieveAuthorizedChunks(embedding, engineerRank, [deptA.id], false, engineer.locationId, 10);
       expect(engineerInDeptA.some((c) => c.documentName === 'Board Merger Plans')).toBe(false);
 
       // INSUFFICIENT clearance + head-department access -> still refused;
       // head-department status only ever satisfies the department half of
       // the check, never the clearance half.
-      const engineerWithHeadAccess = await retrieveAuthorizedChunks(embedding, engineerRank, [headDept.id], true, 10);
+      const engineerWithHeadAccess = await retrieveAuthorizedChunks(embedding, engineerRank, [headDept.id], true, engineer.locationId, 10);
       expect(engineerWithHeadAccess.some((c) => c.documentName === 'Board Merger Plans')).toBe(false);
 
       // Now strip the document back to NO department at all — pure
       // clearance governs again, exactly as if departments never existed:
       // CXO sees it, with no department or head-department status needed.
       await prisma.documentChunk.updateMany({ where: { documentId: boardMergerDoc.id }, data: { departmentIds: [] } });
-      const cxoOnDepartmentless = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [], false, 10);
+      const cxoOnDepartmentless = await retrieveAuthorizedChunks(embedding, cxoCtx.clearanceRank, [], false, cxoCtx.locationId, 10);
       expect(cxoOnDepartmentless.some((c) => c.documentName === 'Board Merger Plans')).toBe(true);
     } finally {
       // Revert the fixture document to its original, departmentless state
@@ -200,6 +221,71 @@ describe('retrieveAuthorizedChunks (DB layer)', () => {
       await prisma.document.update({ where: { id: boardMergerDoc.id }, data: { departments: { set: [] } } });
       await prisma.department.delete({ where: { id: deptA.id } });
       await prisma.department.delete({ where: { id: headDept.id } });
+    }
+  });
+
+  it('a public document bypasses clearance/department/location for every employee, AND is reachable with no identity at all — but a non-public document is never reachable without one', async () => {
+    // Sets up its own temporary public Document (isPublic: true, no
+    // clearance/department/location worth anything — see Document.isPublic's
+    // own schema.prisma comment) for the duration of this test only,
+    // cleaned up in `finally`.
+    const cxo = await prisma.user.findUniqueOrThrow({ where: { email: 'cxo@asktest.local' } });
+    const publicDoc = await prisma.document.create({
+      data: {
+        name: `Test Public Notice ${Date.now()}`,
+        fileKey: 'seed:public-notice',
+        mimeType: 'text/plain',
+        fileSizeBytes: 100,
+        clearanceLevel: 0,
+        uploadedById: cxo.id,
+        status: 'READY',
+        isPublic: true,
+      },
+    });
+
+    try {
+      const embedder = await getEmbeddingProvider();
+      const content = 'This public notice announces a river water quality monitoring initiative.';
+      const [vector] = await embedder.embed([content], 'RETRIEVAL_DOCUMENT');
+      await insertDocumentChunks(publicDoc.id, [{ index: 0, content }], [vector], 0, [], [], true);
+
+      const [queryEmbedding] = await embedder.embed(['river water quality monitoring'], 'RETRIEVAL_QUERY');
+
+      // Reachable with NO identity at all — the unauthenticated public path.
+      const asPublic = await retrievePublicChunks(queryEmbedding, 10);
+      expect(asPublic.some((c) => c.documentId === publicDoc.id)).toBe(true);
+      const publicInventory = await listPublicDocumentSummaries();
+      expect(publicInventory.some((d) => d.id === publicDoc.id)).toBe(true);
+
+      // Reachable by the LOWEST-clearance seeded test user (engineer),
+      // with no matching department and (via a location that ISN'T
+      // theirs) no matching location either — clearance/department/
+      // location are all irrelevant for a public chunk.
+      const engineerCtx = await authContextFor('engineer@asktest.local');
+      const otherLocation = await prisma.location.findFirstOrThrow({
+        where: { id: { not: engineerCtx.locationId } },
+      });
+      const asEngineer = await retrieveAuthorizedChunks(
+        queryEmbedding,
+        engineerCtx.clearanceRank,
+        [], // no matching department
+        false, // no head-department access
+        otherLocation.id, // deliberately NOT engineer's real location
+        10,
+      );
+      expect(asEngineer.some((c) => c.documentId === publicDoc.id)).toBe(true);
+
+      // The reverse must also hold: a genuinely NON-public document (the
+      // fixture's own CXO-only "Board Merger Plans") must never be
+      // reachable through the public, no-identity path — the public
+      // bypass only ever widens access for isPublic content, never for
+      // anything else.
+      const boardMergerDoc = await prisma.document.findFirstOrThrow({ where: { name: 'Board Merger Plans' } });
+      const [mergerEmbedding] = await embedder.embed(['Northwind acquisition due diligence'], 'RETRIEVAL_QUERY');
+      const publicOnMergerQuery = await retrievePublicChunks(mergerEmbedding, 10);
+      expect(publicOnMergerQuery.some((c) => c.documentId === boardMergerDoc.id)).toBe(false);
+    } finally {
+      await prisma.document.delete({ where: { id: publicDoc.id } }); // chunks cascade via FK
     }
   });
 });

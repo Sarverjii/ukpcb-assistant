@@ -22,8 +22,10 @@ import {
 } from '@/lib/documents/uploadClient';
 import { useUploadQueue, type QueueItem } from '@/components/documents/UploadQueueContext';
 import { DepartmentCheckboxList } from '@/components/shared/DepartmentCheckboxList';
+import { LocationCheckboxList } from '@/components/shared/LocationCheckboxList';
 import { ClearanceLevelPicker } from '@/components/shared/ClearanceLevelPicker';
 import type { PickableDepartment } from '@/components/shared/DepartmentPicker';
+import type { PickableLocation } from '@/components/shared/LocationPicker';
 
 type Role = { name: string; hierarchyRank: number };
 
@@ -38,12 +40,14 @@ function fileIconFor(name: string) {
 export function UploadForm({
   roles,
   departments,
+  locations,
   useClientUpload,
   uploadMaxMb,
   onUploadingChange,
 }: {
   roles: Role[];
   departments: PickableDepartment[];
+  locations: PickableLocation[];
   useClientUpload: boolean;
   uploadMaxMb: number;
   // Fires true when a *single*-file upload starts and false once it fully
@@ -154,6 +158,7 @@ export function UploadForm({
           file={files[0]}
           roles={roles}
           departments={departments}
+          locations={locations}
           useClientUpload={useClientUpload}
           uploadMaxMb={uploadMaxMb}
           onRemove={resetAll}
@@ -165,11 +170,12 @@ export function UploadForm({
           files={files}
           roles={roles}
           departments={departments}
+          locations={locations}
           uploadMaxMb={uploadMaxMb}
           onRemoveFile={(f) => setFiles((prev) => prev.filter((x) => x !== f))}
           onReset={resetAll}
-          onStart={(clearanceLevel, departmentIds, validFiles) => {
-            queue.start({ files: validFiles, clearanceLevel, departmentIds, useClientUpload });
+          onStart={(clearanceLevel, departmentIds, locationIds, validFiles) => {
+            queue.start({ files: validFiles, clearanceLevel, departmentIds, locationIds, useClientUpload });
             resetAll();
           }}
         />
@@ -184,6 +190,7 @@ function SingleUpload({
   file,
   roles,
   departments,
+  locations,
   useClientUpload,
   uploadMaxMb,
   onRemove,
@@ -193,6 +200,7 @@ function SingleUpload({
   file: File;
   roles: Role[];
   departments: PickableDepartment[];
+  locations: PickableLocation[];
   useClientUpload: boolean;
   uploadMaxMb: number;
   onRemove: () => void;
@@ -206,6 +214,8 @@ function SingleUpload({
   // meant for everyone; an uploader narrows it down rather than having to
   // remember to opt every department in.
   const [departmentIds, setDepartmentIds] = useState<string[]>(() => departments.map((d) => d.id));
+  // Same all-checked default as departmentIds — see that field's comment.
+  const [locationIds, setLocationIds] = useState<string[]>(() => locations.map((l) => l.id));
   const [tags, setTags] = useState('');
   const [clearanceLevel, setClearanceLevel] = useState('');
   const [status, setStatus] = useState<Status>('idle');
@@ -229,6 +239,7 @@ function SingleUpload({
         description: description.trim() || undefined,
         clearanceLevel: Number(clearanceLevel),
         departmentIds,
+        locationIds,
         tags: tags
           .split(',')
           .map((t) => t.trim())
@@ -319,6 +330,15 @@ function SingleUpload({
             />
           </Field>
 
+          <Field label="Locations" required>
+            <LocationCheckboxList
+              locations={locations}
+              selectedIds={locationIds}
+              onChange={setLocationIds}
+              disabled={busy}
+            />
+          </Field>
+
           <Field label="Tags (comma-separated)">
             <input name="tags" value={tags} onChange={(e) => setTags(e.target.value)} disabled={busy} className={inputClass} />
           </Field>
@@ -334,11 +354,14 @@ function SingleUpload({
           // so there's no browser "please fill in this field" validation
           // to lean on the way the old <select required> got for free —
           // this disabled check is now the only thing stopping a submit
-          // with no clearance level chosen. departmentIds defaults to
-          // every department checked, so hitting zero here means an admin
-          // actively unchecked all of them — still blocked, same as a
-          // missing clearance level (every document needs at least one).
-          disabled={busy || !!validationError || !clearanceLevel || departmentIds.length === 0}
+          // with no clearance level chosen. departmentIds/locationIds
+          // default to everything checked, so hitting zero here means an
+          // admin actively unchecked all of them — still blocked, same as
+          // a missing clearance level (every document needs at least one
+          // of each, both being mandatory axes).
+          disabled={
+            busy || !!validationError || !clearanceLevel || departmentIds.length === 0 || locationIds.length === 0
+          }
           className="rounded-lg bg-brand-700 dark:bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 dark:hover:bg-brand-500 disabled:opacity-60"
         >
           Upload
@@ -366,6 +389,7 @@ function BulkUploadPicker({
   files,
   roles,
   departments,
+  locations,
   uploadMaxMb,
   onRemoveFile,
   onReset,
@@ -374,14 +398,16 @@ function BulkUploadPicker({
   files: File[];
   roles: Role[];
   departments: PickableDepartment[];
+  locations: PickableLocation[];
   uploadMaxMb: number;
   onRemoveFile: (file: File) => void;
   onReset: () => void;
-  onStart: (clearanceLevel: number, departmentIds: string[], validFiles: File[]) => void;
+  onStart: (clearanceLevel: number, departmentIds: string[], locationIds: string[], validFiles: File[]) => void;
 }) {
   const [clearanceLevel, setClearanceLevel] = useState('');
   // Every department checked by default — see SingleUpload's matching comment.
   const [departmentIds, setDepartmentIds] = useState<string[]>(() => departments.map((d) => d.id));
+  const [locationIds, setLocationIds] = useState<string[]>(() => locations.map((l) => l.id));
   const keyOf = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
 
   function statusFor(file: File): { status: Status; error?: string } {
@@ -442,11 +468,14 @@ function BulkUploadPicker({
       <Field label="Departments (applies to all files in this batch)" required>
         <DepartmentCheckboxList departments={departments} selectedIds={departmentIds} onChange={setDepartmentIds} />
       </Field>
+      <Field label="Locations (applies to all files in this batch)" required>
+        <LocationCheckboxList locations={locations} selectedIds={locationIds} onChange={setLocationIds} />
+      </Field>
 
       <button
         type="button"
-        onClick={() => onStart(Number(clearanceLevel), departmentIds, validFiles)}
-        disabled={!clearanceLevel || validFiles.length === 0 || departmentIds.length === 0}
+        onClick={() => onStart(Number(clearanceLevel), departmentIds, locationIds, validFiles)}
+        disabled={!clearanceLevel || validFiles.length === 0 || departmentIds.length === 0 || locationIds.length === 0}
         className="self-start rounded-lg bg-brand-700 dark:bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 dark:hover:bg-brand-500 disabled:opacity-60"
       >
         Upload {validFiles.length} file{validFiles.length === 1 ? '' : 's'}

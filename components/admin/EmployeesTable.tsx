@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   changeEmployeeRoleAction,
   changeEmployeeDepartmentsAction,
+  changeEmployeeLocationAction,
   changeEmployeeMessageLimitAction,
   toggleEmployeeStatusAction,
   resetEmployeePasswordAction,
@@ -14,6 +15,7 @@ import { LocalTime } from '@/components/admin/LocalTime';
 import { ReauthDialog } from '@/components/admin/ReauthDialog';
 import { EmailPreviewModal } from '@/components/admin/EmailPreviewModal';
 import { DepartmentPicker, type PickableDepartment } from '@/components/shared/DepartmentPicker';
+import type { PickableLocation } from '@/components/shared/LocationPicker';
 import { SingleSelect } from '@/components/shared/SingleSelect';
 import { Avatar } from '@/components/shared/Avatar';
 import { RowActionsMenu } from '@/components/shared/RowActionsMenu';
@@ -29,6 +31,8 @@ type User = {
   name: string;
   email: string;
   departments: PickableDepartment[];
+  locationId: string;
+  locationName: string;
   roleId: string;
   roleName: string;
   status: 'ACTIVE' | 'DISABLED' | 'REMOVED';
@@ -43,11 +47,13 @@ export function EmployeesTable({
   users,
   roles,
   departments,
+  locations,
   currentUserId,
 }: {
   users: User[];
   roles: Role[];
   departments: PickableDepartment[];
+  locations: PickableLocation[];
   currentUserId: string;
 }) {
   const [search, setSearch] = useState('');
@@ -122,6 +128,7 @@ export function EmployeesTable({
             <tr>
               <th className="px-4 py-3 font-medium">Employee</th>
               <th className="px-4 py-3 font-medium">Department</th>
+              <th className="px-4 py-3 font-medium">Location</th>
               <th className="px-4 py-3 font-medium">Role / Clearance</th>
               <th className="px-4 py-3 font-medium">Msg limit/day</th>
               <th className="px-4 py-3 font-medium">Status</th>
@@ -136,12 +143,13 @@ export function EmployeesTable({
                 user={u}
                 roles={roles}
                 departments={departments}
+                locations={locations}
                 isSelf={u.id === currentUserId}
               />
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-zinc-400">
+                <td colSpan={8} className="px-4 py-6 text-center text-zinc-400">
                   No employees match your search.
                 </td>
               </tr>
@@ -157,11 +165,13 @@ function EmployeeRow({
   user,
   roles,
   departments,
+  locations,
   isSelf,
 }: {
   user: User;
   roles: Role[];
   departments: PickableDepartment[];
+  locations: PickableLocation[];
   isSelf: boolean;
 }) {
   const router = useRouter();
@@ -170,6 +180,7 @@ function EmployeeRow({
   const [reauthAction, setReauthAction] = useState<ReauthAction | null>(null);
   const [previewEmail, setPreviewEmail] = useState<ComposedEmail | null>(null);
   const [departmentIds, setDepartmentIds] = useState(user.departments.map((d) => d.id));
+  const [locationId, setLocationId] = useState(user.locationId);
   const [limitInput, setLimitInput] = useState(
     user.dailyMessageLimitOverride === null ? '' : String(user.dailyMessageLimitOverride),
   );
@@ -203,6 +214,19 @@ function EmployeeRow({
         // "—" (no departments) even though the real DB row still has its
         // old ones, staying wrong until the next full page load.
         setDepartmentIds(previous);
+      }
+    });
+  }
+
+  function handleLocationChange(newLocationId: string) {
+    const previous = locationId;
+    setLocationId(newLocationId);
+    setError(null);
+    startTransition(async () => {
+      const result = await changeEmployeeLocationAction(user.id, newLocationId);
+      if (result.error) {
+        setError(result.error);
+        setLocationId(previous); // revert the optimistic update, same as handleRoleChange above
       }
     });
   }
@@ -254,6 +278,15 @@ function EmployeeRow({
           onChange={handleDepartmentsChange}
           disabled={pending}
           placeholder="—"
+        />
+      </td>
+      <td className="px-4 py-3">
+        <SingleSelect
+          value={locationId}
+          onChange={handleLocationChange}
+          disabled={pending}
+          options={locations.map((l) => ({ value: l.id, label: l.name }))}
+          triggerClassName="flex items-center justify-between gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-brand-500"
         />
       </td>
       <td className="px-4 py-3">

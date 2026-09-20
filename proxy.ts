@@ -13,11 +13,24 @@ import { auth } from '@/lib/auth/auth.config';
 export default auth((req) => {
   const isLoggedIn = !!req.auth;
   const isLoginPage = req.nextUrl.pathname.startsWith('/login');
+  // The public, unauthenticated chat — "/" itself (app/page.tsx) plus its
+  // backend (streaming answers) and the citation-preview route for a
+  // public document. Nothing else under this prefix scheme is public;
+  // every other route still requires a session, exactly as before.
+  const isPublicChat =
+    req.nextUrl.pathname === '/' ||
+    req.nextUrl.pathname.startsWith('/api/public-chat') ||
+    req.nextUrl.pathname.startsWith('/api/public-documents');
 
-  if (!isLoggedIn && !isLoginPage) {
+  if (!isLoggedIn && !isLoginPage && !isPublicChat) {
     return NextResponse.redirect(new URL('/login', req.nextUrl.origin));
   }
   if (isLoggedIn && isLoginPage) {
+    return NextResponse.redirect(new URL('/chat', req.nextUrl.origin));
+  }
+  // A logged-in employee never sees the public chat at "/" — they land in
+  // the real app instead, same redirect-away treatment /login gets above.
+  if (isLoggedIn && req.nextUrl.pathname === '/') {
     return NextResponse.redirect(new URL('/chat', req.nextUrl.origin));
   }
 });

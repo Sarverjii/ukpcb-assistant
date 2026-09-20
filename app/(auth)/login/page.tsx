@@ -1,3 +1,5 @@
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
 import { LoginForm } from './LoginForm';
 
 export default async function LoginPage({
@@ -21,6 +23,20 @@ export default async function LoginPage({
             'radial-gradient(600px circle at 50% -10%, color-mix(in srgb, var(--color-brand-500) 14%, transparent), transparent 60%)',
         }}
       />
+
+      {/* Back to the public chat ("/") — NOT the same destination as
+          components/BackToChatLink.tsx, which points a logged-in user back
+          into "/chat" (and would just bounce a logged-out visitor straight
+          back here). Positioned as its own corner anchor, matching the
+          standard "return to site" placement on an auth page, rather than
+          competing with the centered card below for attention. */}
+      <Link
+        href="/"
+        className="absolute left-4 top-4 flex items-center gap-1.5 text-sm font-medium text-zinc-500 dark:text-zinc-400 transition-colors hover:text-brand-600 dark:hover:text-brand-400 sm:left-6 sm:top-6"
+      >
+        <ArrowLeft size={16} />
+        Back to chat
+      </Link>
 
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center text-center">

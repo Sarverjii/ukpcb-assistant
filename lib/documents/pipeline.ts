@@ -219,15 +219,17 @@ export async function processDocument(documentId: string): Promise<void> {
         segmentChunks.map((c) => c.content),
         'RETRIEVAL_DOCUMENT',
       );
-      // clearanceLevel AND departments are copied onto every chunk here —
-      // see the denormalization note in prisma/schema.prisma and
-      // lib/db/queries/chunks.ts.
+      // clearanceLevel, departments, locations, AND isPublic are copied
+      // onto every chunk here — see the denormalization note in
+      // prisma/schema.prisma and lib/db/queries/chunks.ts.
       await insertDocumentChunks(
         documentId,
         segmentChunks,
         vectors,
         doc.clearanceLevel,
         doc.departments.map((d) => d.id),
+        doc.locations.map((l) => l.id),
+        doc.isPublic,
         embedder.provider,
         embedder.model,
       );
@@ -298,6 +300,8 @@ export async function processDocument(documentId: string): Promise<void> {
             vectors,
             doc.clearanceLevel,
             doc.departments.map((d) => d.id),
+            doc.locations.map((l) => l.id),
+            doc.isPublic,
             embedder.provider,
             embedder.model,
           );

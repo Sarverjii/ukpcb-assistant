@@ -27,6 +27,12 @@ export type AuthContext = {
   // (not just this user's own), on top of the ordinary rule above. See
   // Department.isHeadDepartment's schema.prisma comment.
   hasHeadDepartmentAccess: boolean;
+  // This user's single location (every employee has exactly one — see
+  // User.locationId's schema.prisma comment). Unlike departmentIds above,
+  // this narrows document visibility rather than adding to it: a document
+  // is visible only if this id appears among its own location tags. See
+  // Location's schema.prisma comment and lib/db/queries/chunks.ts.
+  locationId: string;
   themePreference: 'LIGHT' | 'DARK';
   // The current LoginSession's id — null for a token issued before this
   // feature existed (see the backward-compat note below). Lets Settings'
@@ -77,6 +83,7 @@ export async function getAuthContext(): Promise<AuthContext> {
     isAdmin: user.role.isAdmin,
     departmentIds: user.departments.map((d) => d.id),
     hasHeadDepartmentAccess: user.departments.some((d) => d.isHeadDepartment),
+    locationId: user.locationId,
     themePreference: user.themePreference,
     loginSessionId,
   };

@@ -35,6 +35,19 @@ export const TEST_USERS = [
 
 export const TEST_PASSWORD = 'Password123!';
 
+// Every user and document now needs a location too (User.locationId /
+// Document.locations — mandatory, unlike department, with no "none of the
+// above" escape hatch: see Location's schema.prisma comment). Unlike
+// department, these fixtures can't just leave it empty to stay out of the
+// way of the pure-clearance tests — so instead every test user AND every
+// fixture document is given this SAME single seeded location, which keeps
+// the location check passing unconditionally for all of them, leaving
+// clearance (and, in the dedicated department-interaction test, department)
+// as the only thing actually varying. "Location A" is one of the five
+// canonical locations seeded directly by the add_locations migration, so it
+// already exists on any migrated database before this ever runs.
+export const TEST_LOCATION_NAME = 'Location A';
+
 const FIXTURE_DOCS = [
   {
     name: 'Engineering Handbook',
@@ -98,6 +111,7 @@ export async function seedRoles() {
 // from here ever lands in a real, UI-facing database.
 export async function seedTestUsers() {
   const passwordHash = await hashPassword(TEST_PASSWORD);
+  const location = await prisma.location.findUniqueOrThrow({ where: { name: TEST_LOCATION_NAME } });
   for (const u of TEST_USERS) {
     const role = await prisma.role.findUniqueOrThrow({ where: { name: u.roleName } });
     await prisma.user.upsert({
@@ -109,6 +123,7 @@ export async function seedTestUsers() {
         passwordHash,
         roleId: role.id,
         status: 'ACTIVE',
+        locationId: location.id,
       },
     });
   }
@@ -117,6 +132,7 @@ export async function seedTestUsers() {
 export async function seedFixtureDocuments() {
   const embedder = await getEmbeddingProvider();
   const cxo = await prisma.user.findUniqueOrThrow({ where: { email: 'cxo@asktest.local' } });
+  const location = await prisma.location.findUniqueOrThrow({ where: { name: TEST_LOCATION_NAME } });
 
   for (const doc of FIXTURE_DOCS) {
     const role = await prisma.role.findUniqueOrThrow({ where: { name: doc.roleName } });
@@ -133,12 +149,18 @@ export async function seedFixtureDocuments() {
         clearanceLevel: role.hierarchyRank,
         uploadedById: cxo.id,
         status: 'PROCESSING',
+        locations: { connect: { id: location.id } },
       },
     });
 
     const chunks = chunkText(doc.content, { size: 1000, overlap: 150 });
     const vectors = await embedder.embed(chunks.map((c) => c.content), 'RETRIEVAL_DOCUMENT');
-    await insertDocumentChunks(document.id, chunks, vectors, role.hierarchyRank);
+    // departmentIds stays [] (deliberately departmentless — see
+    // seedTestUsers's comment); locationIds carries the one shared test
+    // location so the mandatory location check passes unconditionally for
+    // every seeded test user, the same "stay out of the way of the pure-
+    // clearance tests" role departmentlessness plays for department.
+    await insertDocumentChunks(document.id, chunks, vectors, role.hierarchyRank, [], [location.id]);
     await prisma.document.update({ where: { id: document.id }, data: { status: 'READY' } });
   }
 }

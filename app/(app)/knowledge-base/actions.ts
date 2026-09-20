@@ -10,16 +10,19 @@ import {
   createDocument,
   updateDocumentClearance,
   updateDocumentDepartments,
+  updateDocumentLocations,
   deleteDocument as deleteDocumentRow,
   updateDocumentFile,
   listIngestedSourceUrls,
   resetDocumentForRetry,
 } from '@/lib/db/queries/documents';
 import { listDepartments, requireNonEmptyDepartments } from '@/lib/db/queries/departments';
+import { listLocations, requireNonEmptyLocations } from '@/lib/db/queries/locations';
 import {
   deleteChunksForDocument,
   updateChunksClearanceForDocument,
   updateChunksDepartmentsForDocument,
+  updateChunksLocationsForDocument,
 } from '@/lib/db/queries/chunks';
 import { getStorageProvider } from '@/lib/documents/storage';
 import { SUPPORTED_MIME_TYPES } from '@/lib/documents/textExtraction';
@@ -114,6 +117,49 @@ export async function changeDocumentDepartmentsAction(
       documentName: doc.name,
       previousDepartmentNames: doc.departments.map((d) => d.name),
       newDepartmentCount: departmentIds.length,
+    },
+  });
+  revalidatePath(KNOWLEDGE_BASE_PATH);
+  return {};
+}
+
+/**
+ * Retags which location(s) a document belongs to — same "manage at or
+ * below your own clearance" gate and re-indexing pattern as
+ * changeDocumentDepartmentsAction, but location narrows unconditionally
+ * (no "no location = unrestricted" branch — see Location's schema.prisma
+ * comment and lib/db/queries/chunks.ts's doc comment for the AND
+ * semantics this enforces).
+ */
+export async function changeDocumentLocationsAction(
+  documentId: string,
+  locationIds: string[],
+): Promise<ActionResult> {
+  const ctx = await getAuthContext();
+  const doc = await getDocument(documentId);
+
+  try {
+    await requireCanManageDocument(ctx, doc.clearanceLevel);
+  } catch (err) {
+    if (err instanceof ForbiddenError) return { error: err.message };
+    throw err;
+  }
+
+  const locationError = requireNonEmptyLocations(locationIds, 'document');
+  if (locationError) return { error: locationError };
+
+  await updateDocumentLocations(documentId, locationIds);
+  await updateChunksLocationsForDocument(documentId, locationIds);
+
+  await logAuditEvent({
+    action: 'DOCUMENT_LOCATIONS_CHANGED',
+    result: 'SUCCESS',
+    userId: ctx.userId,
+    resource: documentId,
+    metadata: {
+      documentName: doc.name,
+      previousLocationNames: doc.locations.map((l) => l.name),
+      newLocationCount: locationIds.length,
     },
   });
   revalidatePath(KNOWLEDGE_BASE_PATH);
@@ -319,8 +365,13 @@ export async function retryDocumentAction(documentId: string): Promise<ActionRes
  * everyone branch lib/db/queries/chunks.ts's retrieval query still
  * technically has (that branch now only matters for pre-existing rows
  * from before this policy; nothing new is ever created that way again).
- * Clearance still applies exactly as it does for an uploaded file:
- * whatever level the person adding it chooses, capped at their own.
+ * Location is mandatory too and has NO such branch at all (see Location's
+ * schema.prisma comment) — so the same trick applies there unconditionally:
+ * tagging with the FULL current location list (`allLocationIds`) is the
+ * only way a URL-sourced document reaches "visible regardless of the
+ * viewer's location", exactly mirroring the department half. Clearance
+ * still applies exactly as it does for an uploaded file: whatever level
+ * the person adding it chooses, capped at their own.
  *
  * The fetched HTML is saved through the storage provider and run through
  * the exact same processDocument pipeline as any other upload — text
@@ -365,6 +416,7 @@ async function saveFetchedPageAsDocument(
   url: string,
   clearanceLevel: number,
   departmentIds: string[],
+  locationIds: string[],
   uploadedById: string,
 ): Promise<string> {
   const name = page.title || url;
@@ -380,6 +432,7 @@ async function saveFetchedPageAsDocument(
     fileSizeBytes: buffer.byteLength,
     clearanceLevel,
     departmentIds,
+    locationIds,
     uploadedById,
     sourceUrl: url,
   });
@@ -452,6 +505,10 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
   if (allDepartments.length === 0) return { error: 'No departments are configured yet.' };
   const allDepartmentIds = allDepartments.map((d) => d.id);
 
+  const allLocations = await listLocations();
+  if (allLocations.length === 0) return { error: 'No locations are configured yet.' };
+  const allLocationIds = allLocations.map((l) => l.id);
+
   let rootUrl: URL;
   try {
     rootUrl = new URL(url);
@@ -473,10 +530,10 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
   // duplicated into a second document. The root still gets fetched live
   // either way: crawl mode needs its current HTML to discover links from,
   // even on a re-run where the root document itself already exists.
-  const existingUrls = await listIngestedSourceUrls();
+  const existingUrls = await listIngestedSourceUrls(false);
   const documentIds = existingUrls.includes(url)
     ? []
-    : [await saveFetchedPageAsDocument(rootPage, url, clearanceLevel, allDepartmentIds, ctx.userId)];
+    : [await saveFetchedPageAsDocument(rootPage, url, clearanceLevel, allDepartmentIds, allLocationIds, ctx.userId)];
 
   // Crawl mode: same-domain pages reachable from the root page within
   // crawlDepth hops, fetched and added the same way, up to the cap
@@ -500,7 +557,9 @@ export async function addDocumentFromUrlAction(formData: FormData): Promise<AddU
         if (documentIds.length >= MAX_CRAWL_PAGES) break;
         try {
           const linkedPage = await fetchUrlForIngestion(link);
-          documentIds.push(await saveFetchedPageAsDocument(linkedPage, link, clearanceLevel, allDepartmentIds, ctx.userId));
+          documentIds.push(
+            await saveFetchedPageAsDocument(linkedPage, link, clearanceLevel, allDepartmentIds, allLocationIds, ctx.userId),
+          );
           if (linkedPage.contentType === 'text/html') {
             for (const deeper of discoverSameDomainLinks(linkedPage.html, rootUrl)) {
               if (!seen.has(deeper)) {

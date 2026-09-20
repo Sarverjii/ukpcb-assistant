@@ -4,6 +4,7 @@ import { requireCanUploadDocuments, ForbiddenError } from '@/lib/auth/rbac';
 import { SUPPORTED_MIME_TYPES } from '@/lib/documents/textExtraction';
 import { createDocument } from '@/lib/db/queries/documents';
 import { requireNonEmptyDepartments } from '@/lib/db/queries/departments';
+import { requireNonEmptyLocations } from '@/lib/db/queries/locations';
 import { processDocument } from '@/lib/documents/pipeline';
 import { logAuditEvent } from '@/lib/audit/log';
 
@@ -41,6 +42,9 @@ export async function POST(request: Request) {
   const departmentIds: string[] = Array.isArray(body?.departmentIds)
     ? body.departmentIds.filter((t: unknown) => typeof t === 'string')
     : [];
+  const locationIds: string[] = Array.isArray(body?.locationIds)
+    ? body.locationIds.filter((t: unknown) => typeof t === 'string')
+    : [];
   const tags: string[] = Array.isArray(body?.tags) ? body.tags.filter((t: unknown) => typeof t === 'string') : [];
 
   if (!pathname || !name) {
@@ -70,6 +74,10 @@ export async function POST(request: Request) {
   if (departmentError) {
     return NextResponse.json({ error: departmentError }, { status: 400 });
   }
+  const locationError = requireNonEmptyLocations(locationIds, 'document');
+  if (locationError) {
+    return NextResponse.json({ error: locationError }, { status: 400 });
+  }
 
   const document = await createDocument({
     name,
@@ -79,6 +87,7 @@ export async function POST(request: Request) {
     fileSizeBytes,
     clearanceLevel,
     departmentIds,
+    locationIds,
     tags,
     uploadedById: ctx.userId,
   });

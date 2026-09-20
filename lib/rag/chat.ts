@@ -199,6 +199,7 @@ async function retrieveContext(
     ctx.clearanceRank,
     ctx.departmentIds,
     ctx.hasHeadDepartmentAccess,
+    ctx.locationId,
   );
   const documentInventory = accessibleDocuments.map(({ name, description }) => ({ name, description }));
 
@@ -216,6 +217,7 @@ async function retrieveContext(
       ctx.clearanceRank,
       ctx.departmentIds,
       ctx.hasHeadDepartmentAccess,
+      ctx.locationId,
     );
     return { relevant, documentInventory, retrievalQuery };
   }
@@ -225,6 +227,7 @@ async function retrieveContext(
     ctx.clearanceRank,
     ctx.departmentIds,
     ctx.hasHeadDepartmentAccess,
+    ctx.locationId,
     TOP_K,
   );
 
@@ -247,6 +250,7 @@ async function retrieveContext(
     ctx.clearanceRank,
     ctx.departmentIds,
     ctx.hasHeadDepartmentAccess,
+    ctx.locationId,
   );
 
   const chunks = mergeChunks(vectorChunks, nameMatchedChunks);

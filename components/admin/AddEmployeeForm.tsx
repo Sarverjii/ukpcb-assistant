@@ -4,17 +4,27 @@ import { useState, useRef, useTransition } from 'react';
 import { createEmployeeAction } from '@/app/(app)/admin/employees/actions';
 import { EmailPreviewModal } from '@/components/admin/EmailPreviewModal';
 import { DepartmentPicker, type PickableDepartment } from '@/components/shared/DepartmentPicker';
+import type { PickableLocation } from '@/components/shared/LocationPicker';
 import { SingleSelect } from '@/components/shared/SingleSelect';
 import type { ComposedEmail } from '@/lib/employees/emailCompose';
 
 type Role = { id: string; name: string; hierarchyRank: number };
 
-export function AddEmployeeForm({ roles, departments }: { roles: Role[]; departments: PickableDepartment[] }) {
+export function AddEmployeeForm({
+  roles,
+  departments,
+  locations,
+}: {
+  roles: Role[];
+  departments: PickableDepartment[];
+  locations: PickableLocation[];
+}) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewEmail, setPreviewEmail] = useState<ComposedEmail | null>(null);
   const [departmentIds, setDepartmentIds] = useState<string[]>([]);
   const [roleId, setRoleId] = useState('');
+  const [locationId, setLocationId] = useState('');
   const [pending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -25,11 +35,17 @@ export function AddEmployeeForm({ roles, departments }: { roles: Role[]; departm
       setError('Select a role.');
       return;
     }
+    if (!locationId) {
+      setError('Select a location.');
+      return;
+    }
     const formData = new FormData(e.currentTarget);
-    // Neither DepartmentPicker nor SingleSelect (roleId, just below) is a
-    // native form element — their selections are appended manually rather
-    // than relying on FormData's automatic collection of named inputs.
+    // Neither DepartmentPicker nor SingleSelect (roleId/locationId, just
+    // below) is a native form element — their selections are appended
+    // manually rather than relying on FormData's automatic collection of
+    // named inputs.
     formData.set('roleId', roleId);
+    formData.set('locationId', locationId);
     for (const id of departmentIds) formData.append('departmentIds', id);
     startTransition(async () => {
       const result = await createEmployeeAction(formData);
@@ -41,6 +57,7 @@ export function AddEmployeeForm({ roles, departments }: { roles: Role[]; departm
       formRef.current?.reset();
       setDepartmentIds([]);
       setRoleId('');
+      setLocationId('');
     });
   }
 
@@ -81,12 +98,24 @@ export function AddEmployeeForm({ roles, departments }: { roles: Role[]; departm
             onChange={setDepartmentIds}
             placeholder="Select department(s)…"
           />
+          <SingleSelect
+            value={locationId}
+            onChange={setLocationId}
+            options={[{ value: '', label: 'Select a location…' }, ...locations.map((l) => ({ value: l.id, label: l.name }))]}
+            triggerClassName="flex w-full items-center justify-between gap-2 rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-500"
+          />
 
           <div className="col-span-1 flex items-center gap-3 sm:col-span-2">
             <button
               type="submit"
-              disabled={pending || departmentIds.length === 0}
-              title={departmentIds.length === 0 ? 'Select at least one department first' : undefined}
+              disabled={pending || departmentIds.length === 0 || !locationId}
+              title={
+                departmentIds.length === 0
+                  ? 'Select at least one department first'
+                  : !locationId
+                    ? 'Select a location first'
+                    : undefined
+              }
               className="rounded-lg bg-brand-700 dark:bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 dark:hover:bg-brand-500 disabled:opacity-60"
             >
               Create employee

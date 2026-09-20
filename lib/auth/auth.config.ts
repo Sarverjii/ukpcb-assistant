@@ -5,15 +5,7 @@ import { prisma } from '@/lib/db/prisma';
 import { verifyPassword } from '@/lib/auth/password';
 import { logAuditEvent } from '@/lib/audit/log';
 import { createLoginSession } from '@/lib/db/queries/loginSessions';
-
-// First value of X-Forwarded-For (or the platform-specific equivalent) is
-// the original client — nothing else in this app has captured IP before
-// now (AuditLog.ipAddress has sat unused since it was added), so this is
-// the first real caller of it.
-function clientIp(request: Request): string | undefined {
-  const forwarded = request.headers.get('x-forwarded-for');
-  return forwarded?.split(',')[0]?.trim() || undefined;
-}
+import { clientIp } from '@/lib/http/clientIp';
 
 // Session strategy note: Auth.js's Credentials provider only officially
 // supports JWT sessions (database sessions are for OAuth-style adapter

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getAuthContext } from '@/lib/auth/session';
 import { listUsersWithRole, listRolesByRank } from '@/lib/db/queries/users';
 import { listDepartments } from '@/lib/db/queries/departments';
+import { listLocations } from '@/lib/db/queries/locations';
 import { listImportBatches } from '@/lib/db/queries/employeeImportBatches';
 import { AddEmployeeForm } from '@/components/admin/AddEmployeeForm';
 import { EmployeesTable } from '@/components/admin/EmployeesTable';
@@ -9,10 +10,11 @@ import { BulkImportEmployees } from '@/components/admin/BulkImportEmployees';
 
 export default async function EmployeesPage() {
   const ctx = await getAuthContext();
-  const [users, roles, departments, batches] = await Promise.all([
+  const [users, roles, departments, locations, batches] = await Promise.all([
     listUsersWithRole(),
     listRolesByRank(),
     listDepartments(),
+    listLocations(),
     listImportBatches(),
   ]);
 
@@ -29,7 +31,11 @@ export default async function EmployeesPage() {
           </Link>
         </div>
       </div>
-      <AddEmployeeForm roles={roles} departments={departments.map((d) => ({ id: d.id, name: d.name }))} />
+      <AddEmployeeForm
+        roles={roles}
+        departments={departments.map((d) => ({ id: d.id, name: d.name }))}
+        locations={locations.map((l) => ({ id: l.id, name: l.name }))}
+      />
       <BulkImportEmployees
         roles={roles.map((r) => ({ id: r.id, name: r.name }))}
         batches={batches.map((b) => ({
@@ -49,6 +55,8 @@ export default async function EmployeesPage() {
           name: u.name,
           email: u.email,
           departments: u.departments.map((d) => ({ id: d.id, name: d.name })),
+          locationId: u.locationId,
+          locationName: u.location.name,
           roleId: u.roleId,
           roleName: u.role.name,
           status: u.status,
@@ -57,6 +65,7 @@ export default async function EmployeesPage() {
         }))}
         roles={roles.map((r) => ({ id: r.id, name: r.name, defaultDailyMessageLimit: r.defaultDailyMessageLimit }))}
         departments={departments.map((d) => ({ id: d.id, name: d.name }))}
+        locations={locations.map((l) => ({ id: l.id, name: l.name }))}
         currentUserId={ctx.userId}
       />
     </div>

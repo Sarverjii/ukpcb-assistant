@@ -33,28 +33,42 @@ export type RetrievedChunk = {
  * LLM. Do not "fetch then filter in JS" this query; that would be the
  * insufficient pattern the spec explicitly calls out.
  *
- * A chunk is authorized if the caller's clearance rank covers it AND
- * (either the chunk has no department at all, OR the caller belongs to at
- * least one of the chunk's (denormalized) departments, OR the caller
+ * A chunk is authorized if EITHER it's a public chunk (dc."isPublic" —
+ * see Document.isPublic's own comment: an unconditional bypass of
+ * everything below, visible to every employee regardless of their own
+ * clearance/department/location) OR the caller's clearance rank covers it
+ * AND (either the chunk has no department at all, OR the caller belongs to
+ * at least one of the chunk's (denormalized) departments, OR the caller
  * belongs to a "head department" — see Department.isHeadDepartment, which
  * counts as membership in every department for this check, clearance
- * still required either way). Clearance is a hard requirement, not one
- * branch of an OR: a document set to "Regional Officer" clearance and "Administrative Officer" department is
- * visible ONLY to someone who is BOTH Regional-Officer-or-above AND in Administrative Officer — not to every
- * Regional-Officer+ employee regardless of department, and not to every Administrative Officer employee
- * regardless of clearance. A document with NO department at all is
- * governed by clearance alone, exactly as if departments didn't exist —
+ * still required either way) AND the caller's single location is one of
+ * the chunk's (denormalized) locations. Clearance and location are both
+ * hard requirements, not branches of an OR: a document set to "Regional
+ * Officer" clearance and "Administrative Officer" department is visible
+ * ONLY to someone who is BOTH Regional-Officer-or-above AND in
+ * Administrative Officer — not to every Regional-Officer+ employee
+ * regardless of department, and not to every Administrative Officer
+ * employee regardless of clearance. A document with NO department at all
+ * is governed by clearance alone, exactly as if departments didn't exist —
  * the department condition only ever narrows, never widens, who a
- * clearance level already admits.
+ * clearance level already admits. Location works the same way but WITHOUT
+ * that empty-means-unrestricted escape hatch, since every document is
+ * required to carry at least one location (see Location's schema.prisma
+ * comment): a chunk whose locationIds is empty (only possible for data
+ * written before this column existed) matches no one, rather than
+ * everyone.
  *
  * `dc."departmentIds" && userDepartmentIds` is Postgres's array-overlap
  * operator; `cardinality(dc."departmentIds") = 0` is true only for a
  * chunk with no department. An empty `userDepartmentIds` array and
  * `hasHeadDepartmentAccess: false` both correctly fall back to pure
- * clearance with no special-casing needed.
+ * clearance with no special-casing needed. `userLocationId = ANY(dc.
+ * "locationIds")` is the location check — a single scalar against an
+ * array, since the caller has exactly one location but a chunk can carry
+ * several.
  *
- * `userClearanceRank`/`userDepartmentIds`/`hasHeadDepartmentAccess` MUST
- * come from a server-side, DB-verified session (see
+ * `userClearanceRank`/`userDepartmentIds`/`hasHeadDepartmentAccess`/
+ * `userLocationId` MUST come from a server-side, DB-verified session (see
  * lib/auth/session.ts::getAuthContext) — never from client input.
  *
  * Uses Prisma's tagged-template $queryRaw, which parameterizes every
@@ -67,6 +81,7 @@ export async function retrieveAuthorizedChunks(
   userClearanceRank: number,
   userDepartmentIds: string[],
   hasHeadDepartmentAccess: boolean,
+  userLocationId: string,
   topK = 6,
 ): Promise<RetrievedChunk[]> {
   const vec = toSql(queryEmbedding);
@@ -82,13 +97,51 @@ export async function retrieveAuthorizedChunks(
       1 - (dc.embedding <=> ${vec}::vector) AS similarity
     FROM "DocumentChunk" dc
     JOIN "Document" d ON d.id = dc."documentId"
-    WHERE dc."clearanceRank" <= ${userClearanceRank}
-      AND (
-        cardinality(dc."departmentIds") = 0
-        OR dc."departmentIds" && ${userDepartmentIds}::text[]
-        OR ${hasHeadDepartmentAccess}
+    WHERE (
+      dc."isPublic"
+      OR (
+        dc."clearanceRank" <= ${userClearanceRank}
+        AND (
+          cardinality(dc."departmentIds") = 0
+          OR dc."departmentIds" && ${userDepartmentIds}::text[]
+          OR ${hasHeadDepartmentAccess}
+        )
+        AND ${userLocationId} = ANY(dc."locationIds")
       )
+    )
       AND d.status = 'READY'
+    ORDER BY dc.embedding <=> ${vec}::vector
+    LIMIT ${topK}
+  `;
+}
+
+/**
+ * The public counterpart of retrieveAuthorizedChunks — backs the
+ * unauthenticated public chat (app/api/public-chat/stream/route.ts), which
+ * has no AuthContext at all. Deliberately the simplest possible WHERE
+ * clause: ONLY dc."isPublic" — no clearance, no department, no location,
+ * because there is no caller identity here to check any of them against.
+ * This is the one retrieval path in the app that runs with zero
+ * authorization checks, which is safe ONLY because it is hard-scoped to
+ * isPublic content and nothing else — the same isPublic flag that also
+ * lets these exact same chunks reach every logged-in employee via the
+ * OR-bypass in retrieveAuthorizedChunks above.
+ */
+export async function retrievePublicChunks(queryEmbedding: number[], topK = 30): Promise<RetrievedChunk[]> {
+  const vec = toSql(queryEmbedding);
+
+  return prisma.$queryRaw<RetrievedChunk[]>`
+    SELECT
+      dc.id,
+      dc.content,
+      dc."documentId" AS "documentId",
+      d.name AS "documentName",
+      d."clearanceLevel" AS "clearanceLevel",
+      d."sourceUrl" AS "sourceUrl",
+      1 - (dc.embedding <=> ${vec}::vector) AS similarity
+    FROM "DocumentChunk" dc
+    JOIN "Document" d ON d.id = dc."documentId"
+    WHERE dc."isPublic" AND d.status = 'READY'
     ORDER BY dc.embedding <=> ${vec}::vector
     LIMIT ${topK}
   `;
@@ -135,6 +188,7 @@ export async function getChunkForUser(
   userClearanceRank: number,
   userDepartmentIds: string[],
   hasHeadDepartmentAccess: boolean,
+  userLocationId: string,
 ): Promise<ChunkForUser | null> {
   const rows = await prisma.$queryRaw<ChunkForUser[]>`
     SELECT dc.id, dc.content, dc."documentId" AS "documentId", d.name AS "documentName",
@@ -143,11 +197,17 @@ export async function getChunkForUser(
     FROM "DocumentChunk" dc
     JOIN "Document" d ON d.id = dc."documentId"
     WHERE dc.id = ${chunkId}
-      AND dc."clearanceRank" <= ${userClearanceRank}
       AND (
-        cardinality(dc."departmentIds") = 0
-        OR dc."departmentIds" && ${userDepartmentIds}::text[]
-        OR ${hasHeadDepartmentAccess}
+        dc."isPublic"
+        OR (
+          dc."clearanceRank" <= ${userClearanceRank}
+          AND (
+            cardinality(dc."departmentIds") = 0
+            OR dc."departmentIds" && ${userDepartmentIds}::text[]
+            OR ${hasHeadDepartmentAccess}
+          )
+          AND ${userLocationId} = ANY(dc."locationIds")
+        )
       )
     LIMIT 1
   `;
@@ -175,6 +235,7 @@ export async function retrieveChunksForDocuments(
   userClearanceRank: number,
   userDepartmentIds: string[],
   hasHeadDepartmentAccess: boolean,
+  userLocationId: string,
   capPerDocument = 8,
 ): Promise<RetrievedChunk[]> {
   if (documentIds.length === 0) return [];
@@ -196,12 +257,18 @@ export async function retrieveChunksForDocuments(
         ) AS rank
       FROM "DocumentChunk" dc
       JOIN "Document" d ON d.id = dc."documentId"
-      WHERE dc."clearanceRank" <= ${userClearanceRank}
-        AND (
-          cardinality(dc."departmentIds") = 0
-          OR dc."departmentIds" && ${userDepartmentIds}::text[]
-          OR ${hasHeadDepartmentAccess}
+      WHERE (
+        dc."isPublic"
+        OR (
+          dc."clearanceRank" <= ${userClearanceRank}
+          AND (
+            cardinality(dc."departmentIds") = 0
+            OR dc."departmentIds" && ${userDepartmentIds}::text[]
+            OR ${hasHeadDepartmentAccess}
+          )
+          AND ${userLocationId} = ANY(dc."locationIds")
         )
+      )
         AND d.status = 'READY'
         AND dc."documentId" = ANY(${documentIds}::text[])
     ) ranked
@@ -213,10 +280,15 @@ export async function retrieveChunksForDocuments(
 
 /**
  * Inserts chunks + embeddings for a document, denormalizing the parent
- * document's clearance level AND departments onto every chunk. This
- * denormalization is what lets retrieveAuthorizedChunks() filter without a
- * join being load-bearing for security — the authorization check lives
- * directly on the row being ordered by similarity.
+ * document's clearance level, departments, AND locations onto every chunk.
+ * This denormalization is what lets retrieveAuthorizedChunks() filter
+ * without a join being load-bearing for security — the authorization check
+ * lives directly on the row being ordered by similarity. `locationIds`
+ * has no optional default the way `departmentIds` does — every real caller
+ * is expected to pass at least one, since a document is required to carry
+ * a location (see Location's schema.prisma comment) — but the parameter
+ * itself stays a plain array rather than throwing here, so this function
+ * doesn't duplicate validation that belongs in the upload/edit actions.
  */
 export async function insertDocumentChunks(
   documentId: string,
@@ -224,6 +296,11 @@ export async function insertDocumentChunks(
   embeddings: number[][],
   clearanceLevel: number,
   departmentIds: string[] = [],
+  locationIds: string[] = [],
+  // Denormalized from Document.isPublic — see that field's own comment.
+  // Defaults false so every pre-existing call site (departmentless/
+  // locationless test fixtures included) keeps compiling unchanged.
+  isPublic = false,
   // Which provider/model actually produced `embeddings` — see
   // EmbeddingProvider's own comment for why this is tracked. Optional only
   // so existing call sites keep compiling; every real caller should pass
@@ -240,9 +317,9 @@ export async function insertDocumentChunks(
       const vec = toSql(embeddings[i]);
       return prisma.$executeRaw`
         INSERT INTO "DocumentChunk"
-          (id, "documentId", "chunkIndex", content, embedding, "clearanceRank", "departmentIds", "pageNumber", "embeddingProvider", "embeddingModel", "createdAt")
+          (id, "documentId", "chunkIndex", content, embedding, "clearanceRank", "departmentIds", "locationIds", "isPublic", "pageNumber", "embeddingProvider", "embeddingModel", "createdAt")
         VALUES
-          (gen_random_uuid()::text, ${documentId}, ${chunk.index}, ${chunk.content}, ${vec}::vector, ${clearanceLevel}, ${departmentIds}::text[], ${chunk.pageNumber ?? null}, ${embeddingProvider ?? null}::"AIProviderKind", ${embeddingModel ?? null}, now())
+          (gen_random_uuid()::text, ${documentId}, ${chunk.index}, ${chunk.content}, ${vec}::vector, ${clearanceLevel}, ${departmentIds}::text[], ${locationIds}::text[], ${isPublic}, ${chunk.pageNumber ?? null}, ${embeddingProvider ?? null}::"AIProviderKind", ${embeddingModel ?? null}, now())
       `;
     }),
     // Prisma's default interactive-transaction timeout is 5000ms, covering
@@ -293,6 +370,19 @@ export function updateChunksDepartmentsForDocument(documentId: string, departmen
   return prisma.documentChunk.updateMany({
     where: { documentId },
     data: { departmentIds },
+  });
+}
+
+/**
+ * Same re-indexing as updateChunksClearanceForDocument/
+ * updateChunksDepartmentsForDocument, for location: called whenever an
+ * admin changes which location(s) a document is tagged with, so retrieval
+ * reflects the new set immediately.
+ */
+export function updateChunksLocationsForDocument(documentId: string, locationIds: string[]) {
+  return prisma.documentChunk.updateMany({
+    where: { documentId },
+    data: { locationIds },
   });
 }
 

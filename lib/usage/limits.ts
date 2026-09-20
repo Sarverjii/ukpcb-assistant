@@ -6,8 +6,20 @@ import {
   getDepartmentsWithLimits,
   getOrgUsagePolicy,
   ORG_SCOPE_ID,
+  PUBLIC_ORG_SCOPE_ID,
 } from '@/lib/db/queries/usage';
 import { logAuditEvent } from '@/lib/audit/log';
+
+// The public chat's own per-visitor-IP daily cap — deliberately a fixed
+// constant, not admin-configurable, unlike the org-wide public limit (see
+// OrgUsagePolicy.publicDailyMessageLimit). This is a technical abuse-
+// prevention valve (bound a single source's worst-case cost), not a cost
+// lever an admin needs to tune the way the org-wide total is — the
+// meaningful, auditable number to adjust is the total, in Admin → Usage
+// Limits. 30/day comfortably covers a genuine visitor asking several real
+// questions while still bounding what a single IP could cost even at its
+// ceiling every day.
+const PUBLIC_IP_DAILY_LIMIT = 30;
 
 /**
  * Chat-message usage limiting — the mechanics a real company uses to make
@@ -39,15 +51,22 @@ import { logAuditEvent } from '@/lib/audit/log';
  * — a blocked request costs nothing, not even a wasted API call.
  */
 export class UsageLimitExceededError extends Error {
-  readonly scope: 'ORG' | 'DEPARTMENT' | 'USER';
+  readonly scope: 'ORG' | 'DEPARTMENT' | 'USER' | 'PUBLIC_ORG' | 'PUBLIC_IP';
   readonly limit: number;
   readonly used: number;
 
-  constructor(scope: 'ORG' | 'DEPARTMENT' | 'USER', limit: number, used: number, departmentName?: string) {
+  constructor(
+    scope: 'ORG' | 'DEPARTMENT' | 'USER' | 'PUBLIC_ORG' | 'PUBLIC_IP',
+    limit: number,
+    used: number,
+    departmentName?: string,
+  ) {
     const messages = {
       ORG: `UKPCB Assistant has reached its organization-wide daily message limit (${limit}). This resets at midnight UTC — please try again tomorrow, or ask an admin to raise the limit in Admin → Usage Limits.`,
       DEPARTMENT: `${departmentName ?? 'Your department'} has reached its daily message limit (${limit}) for today. This resets at midnight UTC, or an admin can raise it in Admin → Usage Limits.`,
       USER: `You've reached your daily message limit (${limit}) for today. This resets at midnight UTC, or an admin can raise your limit in Admin → Employees.`,
+      PUBLIC_ORG: `This assistant has reached its daily limit (${limit}) for public questions. Please try again tomorrow.`,
+      PUBLIC_IP: `You've reached today's limit (${limit}) for this chat. Please try again tomorrow.`,
     };
     super(messages[scope]);
     this.name = 'UsageLimitExceededError';
@@ -60,7 +79,7 @@ export class UsageLimitExceededError extends Error {
 /** A signal-only internal error used to unwind checkAndConsumeUsage's transaction with the details of which limit was hit — never thrown past this module. */
 class UsageBlockedSignal extends Error {
   constructor(
-    readonly scope: 'ORG' | 'DEPARTMENT' | 'USER',
+    readonly scope: 'ORG' | 'DEPARTMENT' | 'USER' | 'PUBLIC_ORG' | 'PUBLIC_IP',
     readonly scopeId: string,
     readonly limit: number,
     readonly departmentName?: string,
@@ -112,6 +131,41 @@ export async function checkAndConsumeUsage(ctx: { userId: string; departmentIds:
         metadata: { scope: err.scope, limit: err.limit, used, departmentName: err.departmentName },
       });
       throw new UsageLimitExceededError(err.scope, err.limit, used, err.departmentName);
+    }
+    throw err;
+  }
+}
+
+/**
+ * The public chat's own entry point, called before any real work exactly
+ * like checkAndConsumeUsage above — but against a completely separate pool
+ * (see OrgUsagePolicy.publicDailyMessageLimit's own comment for why this
+ * must never share a counter with employee usage). Two tiers, same
+ * atomic-transaction "no leakage" guarantee: the org-wide public total
+ * (admin-configurable), then a fixed per-visitor-IP cap
+ * (PUBLIC_IP_DAILY_LIMIT) so no single source can exhaust the shared total
+ * on its own. There is no per-user tier here — there is no user.
+ */
+export async function checkAndConsumePublicUsage(ip: string): Promise<void> {
+  const orgPolicy = await getOrgUsagePolicy();
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      const orgOk = await atomicCheckAndIncrement(tx, 'PUBLIC_ORG', PUBLIC_ORG_SCOPE_ID, orgPolicy.publicDailyMessageLimit);
+      if (!orgOk) throw new UsageBlockedSignal('PUBLIC_ORG', PUBLIC_ORG_SCOPE_ID, orgPolicy.publicDailyMessageLimit);
+
+      const ipOk = await atomicCheckAndIncrement(tx, 'PUBLIC_IP', ip, PUBLIC_IP_DAILY_LIMIT);
+      if (!ipOk) throw new UsageBlockedSignal('PUBLIC_IP', ip, PUBLIC_IP_DAILY_LIMIT);
+    });
+  } catch (err) {
+    if (err instanceof UsageBlockedSignal) {
+      const used = await readTodayCount(prisma, err.scope, err.scopeId);
+      await logAuditEvent({
+        action: 'USAGE_LIMIT_EXCEEDED',
+        result: 'DENIED',
+        metadata: { scope: err.scope, limit: err.limit, used, ip },
+      });
+      throw new UsageLimitExceededError(err.scope, err.limit, used);
     }
     throw err;
   }

@@ -5,6 +5,7 @@ import { getStorageProvider } from '@/lib/documents/storage';
 import { SUPPORTED_MIME_TYPES } from '@/lib/documents/textExtraction';
 import { createDocument } from '@/lib/db/queries/documents';
 import { requireNonEmptyDepartments } from '@/lib/db/queries/departments';
+import { requireNonEmptyLocations } from '@/lib/db/queries/locations';
 import { processDocument } from '@/lib/documents/pipeline';
 import { logAuditEvent } from '@/lib/audit/log';
 import { config } from '@/lib/config';
@@ -45,6 +46,7 @@ export async function POST(request: Request) {
   const description = String(formData.get('description') ?? '').trim() || undefined;
   const clearanceLevelRaw = formData.get('clearanceLevel');
   const departmentIds = formData.getAll('departmentIds').map(String).filter(Boolean);
+  const locationIds = formData.getAll('locationIds').map(String).filter(Boolean);
   const tagsRaw = String(formData.get('tags') ?? '').trim();
 
   if (!(file instanceof File)) {
@@ -72,6 +74,10 @@ export async function POST(request: Request) {
   if (departmentError) {
     return NextResponse.json({ error: departmentError }, { status: 400 });
   }
+  const locationError = requireNonEmptyLocations(locationIds, 'document');
+  if (locationError) {
+    return NextResponse.json({ error: locationError }, { status: 400 });
+  }
   if (!SUPPORTED_MIME_TYPES.includes(file.type)) {
     return NextResponse.json(
       { error: `Unsupported file type: ${file.type || 'unknown'}` },
@@ -98,6 +104,7 @@ export async function POST(request: Request) {
     fileSizeBytes: file.size,
     clearanceLevel,
     departmentIds,
+    locationIds,
     tags: tagsRaw ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) : [],
     uploadedById: ctx.userId,
   });

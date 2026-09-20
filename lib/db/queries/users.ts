@@ -8,6 +8,7 @@ import type { UserStatus, CreationMethod } from '@prisma/client';
 const WITH_ROLE_AND_PROVENANCE = {
   role: true,
   departments: true,
+  location: true,
   createdBy: { select: { id: true, name: true } },
 } as const;
 
@@ -95,6 +96,11 @@ export type CreateUserInput = {
   passwordHash: string;
   roleId: string;
   departmentIds?: string[];
+  // Required, unlike departmentIds — every employee has exactly one
+  // location (User.locationId, a mandatory scalar FK — see its
+  // schema.prisma comment), so there's no "leave it unset" path the way
+  // an employee can start with zero departments.
+  locationId: string;
   // Provenance — who created this account, and how. Omitting createdById
   // (e.g. a seed script) leaves it null, displayed as "System" on the
   // roster export. creationMethod defaults to MANUAL at the schema level;
@@ -114,6 +120,7 @@ export function createUser(input: CreateUserInput) {
       departments: input.departmentIds?.length
         ? { connect: input.departmentIds.map((id) => ({ id })) }
         : undefined,
+      locationId: input.locationId,
       createdById: input.createdById,
       creationMethod: input.creationMethod,
       importBatchId: input.importBatchId,
@@ -125,6 +132,13 @@ export function updateUserDepartments(userId: string, departmentIds: string[]) {
   return prisma.user.update({
     where: { id: userId },
     data: { departments: { set: departmentIds.map((id) => ({ id })) } },
+  });
+}
+
+export function updateUserLocation(userId: string, locationId: string) {
+  return prisma.user.update({
+    where: { id: userId },
+    data: { locationId },
   });
 }
 
@@ -167,12 +181,18 @@ export function deleteUser(userId: string) {
 }
 
 export function getUserById(userId: string) {
-  return prisma.user.findUniqueOrThrow({ where: { id: userId }, include: { role: true, departments: true } });
+  return prisma.user.findUniqueOrThrow({
+    where: { id: userId },
+    include: { role: true, departments: true, location: true },
+  });
 }
 
 /** Same as getUserById, but returns null on a bad id instead of throwing —
  * for the admin employee-conversations pages, which need to notFound()
  * cleanly on an id from the URL rather than crash. */
 export function getUserByIdOrNull(userId: string) {
-  return prisma.user.findUnique({ where: { id: userId }, include: { role: true, departments: true } });
+  return prisma.user.findUnique({
+    where: { id: userId },
+    include: { role: true, departments: true, location: true },
+  });
 }

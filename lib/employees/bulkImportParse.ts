@@ -6,7 +6,11 @@ import ExcelJS from 'exceljs';
 // no reason to know internal role ids. "departments" is semicolon-
 // separated (e.g. "Engineering; QA") so a flat spreadsheet cell can name
 // more than one — an employee may belong to any number of departments.
-const REQUIRED_HEADERS = ['name', 'email', 'role'] as const;
+// "location" is a single name (e.g. "Location A") — unlike departments, an
+// employee has exactly one location (see User.locationId's schema
+// comment), so this column takes no semicolon-list and is required, not
+// optional, the same way "role" is.
+const REQUIRED_HEADERS = ['name', 'email', 'role', 'location'] as const;
 
 export type BulkImportRow = {
   rowNumber: number; // 1-based, matches what a spreadsheet author would count (header excluded)
@@ -14,6 +18,7 @@ export type BulkImportRow = {
   email: string;
   roleName: string;
   departmentNames: string[];
+  locationName: string;
 };
 
 export type BulkImportParseResult =
@@ -46,6 +51,7 @@ function rowsFromRecords(records: Record<string, string>[]): BulkImportParseResu
       departmentNames: byKey('department') || byKey('departments')
         ? (byKey('department') || byKey('departments')).split(';').map((d) => d.trim()).filter(Boolean)
         : [],
+      locationName: byKey('location'),
     };
   });
 

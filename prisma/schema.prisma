@@ -131,6 +131,15 @@ model User {
   // see DocumentChunk.departmentIds and lib/db/queries/chunks.ts for the
   // resulting "clearance OR department" visibility rule.
   departments               Department[]
+  // Exactly ONE location, unlike departments above (zero-to-many) — every
+  // employee works out of exactly one physical site, by explicit design
+  // (see Location's own schema comment for the full visibility rule this
+  // enforces). Required, not optional: there is no "no location" state for
+  // an employee, so this is a plain required foreign key rather than an
+  // implicit M2M — createEmployeeAction and bulkImportEmployeesAction both
+  // require a value before a User row can be created at all.
+  locationId                String
+  location                  Location             @relation(fields: [locationId], references: [id])
   status                    UserStatus           @default(ACTIVE)
   // Account-level, not browser-level — follows the user across devices/
   // browsers, unlike a localStorage-only preference. Defaults to LIGHT.
@@ -171,6 +180,7 @@ model User {
   @@index([roleId])
   @@index([createdById])
   @@index([importBatchId])
+  @@index([locationId])
 }
 
 // One row per uploaded employee CSV/XLSX, kept forever (never overwritten
@@ -258,6 +268,35 @@ model Department {
   documents Document[]
 }
 
+// A separate, STRICTER visibility axis from Department above — physical
+// site rather than org function. Two differences from Department drive
+// every asymmetry between this model and that one:
+//   1. Every employee has EXACTLY one location (User.locationId is a
+//      required scalar FK, not an implicit M2M) — see that field's own
+//      comment. A document, symmetrically with Department, can carry one
+//      or more locations (Document.locations, an implicit M2M) since a
+//      single notice can legitimately apply to several sites at once.
+//   2. The visibility rule is a hard AND, not an OR: Department only ever
+//      ADDS visibility on top of clearance (a document with no department
+//      is visible on clearance alone). Location instead NARROWS it
+//      unconditionally — a document is visible only to a viewer whose
+//      single location appears among the document's location tags, no
+//      exceptions, layered on top of (never instead of) the existing
+//      clearance-and-department check. Every document is required to
+//      carry at least one location (enforced in the upload/edit actions,
+//      not the database, the same way clearance is already required
+//      there) specifically so this check is never accidentally bypassable
+//      by a document simply having none. See DocumentChunk.locationIds and
+//      lib/db/queries/chunks.ts for the enforcement.
+model Location {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  users     User[]
+  documents Document[]
+}
+
 // A revocable record of one login, tracked entirely separately from Auth.js's
 // own `Session` model above (which stays dead/unused — this app's auth is
 // pure JWT, see auth.config.ts's own comment on why). Created once per
@@ -312,9 +351,25 @@ model Document {
   // lib/documents/pipeline.ts on every (re)processing pass, including a
   // file replace, so it never drifts from the current content.
   previewFileKey      String?
+  // True only for a document added through Admin → Public Content — a
+  // deliberately separate pool from every clearance/department/location-
+  // gated document above. A public document bypasses clearanceLevel,
+  // departments, AND locations entirely (see the OR-bypass in
+  // lib/db/queries/chunks.ts and lib/db/queries/documents.ts): it is
+  // visible to the unauthenticated public chat (which can see NOTHING
+  // else) and, simultaneously, to every logged-in employee regardless of
+  // their own clearance/department/location — the one thing every visitor,
+  // authenticated or not, is guaranteed to see. clearanceLevel is still
+  // set (to 0, the lowest possible) for a public document purely because
+  // the column is non-nullable; it plays no role in who can see it.
+  // departments/locations are simply left empty. Denormalized onto
+  // DocumentChunk.isPublic at write time, same as every other visibility
+  // flag on this model.
+  isPublic            Boolean        @default(false)
   // Semantically: the minimum Role.hierarchyRank required to view this
   // document. Stored as a plain int (not a Role relation) so it survives
   // even if roles are later restructured, and so it's cheap to compare.
+  // Meaningless for a public document (isPublic above) — see its comment.
   clearanceLevel      Int
   // Zero, one, or several departments — an implicit Prisma M2M (see
   // Department.documents). Purely additive to clearanceLevel: a viewer sees
@@ -323,6 +378,12 @@ model Document {
   // at write time for the same reason clearanceRank already is — see this
   // file's module-level security note.
   departments         Department[]
+  // One or more locations — required (see Location's own schema comment
+  // for why this is a hard AND-narrowed visibility rule, unlike
+  // departments above). Enforced at the application layer, in the same
+  // upload/edit actions that already require clearanceLevel, since Prisma
+  // can't express "at least one" on an implicit M2M directly.
+  locations           Location[]
   tags                String[]       @default([])
   // Nullable so a hard-deleted employee (see deleteEmployeePermanentlyAction)
   // never forces their documents to be deleted along with them — the FK
@@ -402,6 +463,24 @@ model DocumentChunk {
   // array-overlap operator (&&) against the viewer's own department ids —
   // see lib/db/queries/chunks.ts.
   departmentIds String[] @default([])
+
+  // Denormalized from Document.locations at insert/update time — same
+  // reasoning as departmentIds above, but checked as a hard AND rather
+  // than an additive OR: see Location's own schema comment and
+  // lib/db/queries/chunks.ts. Never legitimately empty (every document is
+  // required to carry at least one location), but a chunk written before
+  // this column existed defaults to empty, which the retrieval query
+  // treats as "matches no location" rather than "unrestricted" —
+  // deliberately the opposite fallback from departmentIds, since an empty
+  // array here must never accidentally widen access.
+  locationIds String[] @default([])
+
+  // Denormalized from Document.isPublic — see that field's own comment.
+  // Checked as an unconditional OR-bypass ahead of the clearance/
+  // department/location conditions above: a public chunk is retrievable
+  // regardless of what any of those three say, by every caller (the
+  // unauthenticated public chat, and every logged-in employee alike).
+  isPublic Boolean @default(false)
 
   // Which embedding provider/model actually produced this row's vector —
   // stamped at insert/re-embed time from the active EmbeddingProvider (see
@@ -574,6 +653,17 @@ model OrgUsagePolicy {
   // grows, while comfortably covering realistic total usage across the
   // whole company (roughly 89 employees today).
   dailyMessageLimit Int      @default(5000)
+  // The public (unauthenticated) chat's own org-wide circuit breaker —
+  // deliberately a SEPARATE pool from dailyMessageLimit above, which only
+  // ever counts real employees: a spike of anonymous public traffic must
+  // never be able to eat into (or be capped by) the company's own AI
+  // budget, and vice versa. Checked together with a fixed per-visitor-IP
+  // cap (see lib/usage/limits.ts::PUBLIC_IP_DAILY_LIMIT) — this is the
+  // second, broader layer, the same two-tier shape (individual + org-wide)
+  // employee usage already has. 200/day is a conservative seeded default
+  // for a newly-exposed public surface; raise it from Admin → Usage Limits
+  // once real traffic patterns are known.
+  publicDailyMessageLimit Int @default(200)
   updatedAt         DateTime @updatedAt
   updatedById       String?
   updatedBy         User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
@@ -583,6 +673,10 @@ enum UsageScope {
   USER
   DEPARTMENT
   ORG
+  // The public chat's org-wide counter (see OrgUsagePolicy.publicDailyMessageLimit) — scopeId is always the fixed string "public" (see PUBLIC_ORG_SCOPE_ID), the PUBLIC_ORG counterpart to ORG's "org".
+  PUBLIC_ORG
+  // One counter per distinct visitor IP address for the public chat — scopeId is the IP itself. Bounds a single source's worst-case daily cost independent of the org-wide PUBLIC_ORG breaker above.
+  PUBLIC_IP
 }
 
 // One row per (scope, scopeId, day) — the atomic counter every quota check

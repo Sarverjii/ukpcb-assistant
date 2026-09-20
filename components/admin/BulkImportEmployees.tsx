@@ -74,9 +74,10 @@ export function BulkImportEmployees({ roles, batches }: { roles: Role[]; batches
       {open && (
         <div className="mt-4 flex flex-col gap-3">
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Columns: <code className="font-mono">name, email, role, departments</code> (departments
-            optional — separate multiple with a semicolon, e.g. &quot;Engineering; QA&quot;). Role and
-            each department must match an existing name
+            Columns: <code className="font-mono">name, email, role, location, departments</code>{' '}
+            (departments optional — separate multiple with a semicolon, e.g. &quot;Engineering;
+            QA&quot;; location takes exactly one — every employee belongs to exactly one location).
+            Role, location, and each department must match an existing name
             {roles.length > 0 ? ` — e.g. "${roles[0].name}"` : ''}. An email that already exists is
             skipped, not an error — re-uploading a growing sheet only creates new employees. Every
             upload is saved and viewable again from Import history below.

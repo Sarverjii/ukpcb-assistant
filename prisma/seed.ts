@@ -45,6 +45,18 @@ async function main() {
     console.warn('No departments exist yet — the seeded admin has none either; assign one from Admin → Departments before it can be used for anything department-gated.');
   }
 
+  // Unlike departments, location is a mandatory SINGLE scalar (User.locationId
+  // — see its schema.prisma comment) with no "belongs everywhere" umbrella
+  // option: a document tagged Location A is invisible to anyone whose own
+  // location isn't A, admin included, with no bypass. The seeded admin gets
+  // whichever location sorts first (normally "Location A", seeded by the
+  // locations migration) purely as an arbitrary but valid starting point —
+  // reassign it from Admin → Employees if that's not the right one.
+  const firstLocation = await prisma.location.findFirst({ orderBy: { name: 'asc' } });
+  if (!firstLocation) {
+    throw new Error('No locations exist yet — the locations migration should have seeded Location A-E before this runs.');
+  }
+
   await prisma.user.upsert({
     where: { email: ADMIN_EMAIL },
     update: {},
@@ -55,6 +67,7 @@ async function main() {
       roleId: adminRole.id,
       status: 'ACTIVE',
       departments: { connect: departments.map((d) => ({ id: d.id })) },
+      locationId: firstLocation.id,
     },
   });
 

@@ -19,6 +19,7 @@ type StartParams = {
   files: File[];
   clearanceLevel: number;
   departmentIds?: string[];
+  locationIds?: string[];
   useClientUpload: boolean;
 };
 
@@ -93,6 +94,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
               name: stripExtension(file.name),
               clearanceLevel: params.clearanceLevel,
               departmentIds: params.departmentIds,
+              locationIds: params.locationIds,
             },
             params.useClientUpload,
           );

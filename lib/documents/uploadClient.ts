@@ -57,6 +57,7 @@ export async function submitFile(
     description?: string;
     clearanceLevel: number;
     departmentIds?: string[];
+    locationIds?: string[];
     tags?: string[];
   },
   useClientUpload: boolean,
@@ -85,6 +86,7 @@ export async function submitFile(
         description: meta.description,
         clearanceLevel: meta.clearanceLevel,
         departmentIds: meta.departmentIds ?? [],
+        locationIds: meta.locationIds ?? [],
         tags: meta.tags ?? [],
       }),
     });
@@ -98,6 +100,7 @@ export async function submitFile(
   if (meta.description) formData.set('description', meta.description);
   formData.set('clearanceLevel', String(meta.clearanceLevel));
   for (const id of meta.departmentIds ?? []) formData.append('departmentIds', id);
+  for (const id of meta.locationIds ?? []) formData.append('locationIds', id);
   if (meta.tags?.length) formData.set('tags', meta.tags.join(','));
   const res = await fetch('/api/documents/upload', { method: 'POST', body: formData });
   const data = await res.json();
